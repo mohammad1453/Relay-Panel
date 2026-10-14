@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block body %}<div class="auth panel"><span class="eyebrow">{{ status }}</span><h1>{{ t('error') }}</h1><p role="alert">{{ t(error) }}</p><a class="button" href="{{ '/login' if not user else '/' }}">{{ t('back') }}</a></div>{% endblock %}

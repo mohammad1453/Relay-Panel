@@ -1,0 +1,12 @@
+.venv/
+.reference/
+__pycache__/
+.pytest_cache/
+.env
+*.db
+*.db-*
+state/
+backups/
+*.tar.gz
+/RelayPanel.zip
+.coverage
