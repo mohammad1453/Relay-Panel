@@ -207,7 +207,13 @@ def test_config_rejects_db_collision(tmp_path):
 
 def test_public_http_config_requires_remote_origin_and_valid_path(tmp_path):
     path=str(tmp_path/'app.db')
-    Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret').validate()
+    master=dict(xui_database_paths='/etc/x-ui/x-ui.db',xui_url='https://panel.invalid/',xui_token='t')
+    Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret',**master).validate()
+    # Public HTTP keeps the production configuration checks.
+    with pytest.raises(ValueError,match='XUI_DATABASE_PATHS'):
+        Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret').validate()
+    with pytest.raises(ValueError,match='master'):
+        Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret',xui_database_paths='/etc/x-ui/x-ui.db').validate()
     with pytest.raises(ValueError):
         Config(path,'http://localhost:8095',production=False,public_http=True,base_path='/relay-secret').validate()
     with pytest.raises(ValueError):

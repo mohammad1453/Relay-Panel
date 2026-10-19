@@ -333,3 +333,39 @@ def test_uncertain_create_cannot_use_unsent_retry(setup):
     old=sale(service,actor,inbounds=[1,2])
     with pytest.raises(RuleError,match='reconcile_required'):
         service.retry_unsent(actor,old['id'],str(uuid.uuid4()))
+
+
+def test_failed_logins_from_one_ip_do_not_lock_out_others(setup):
+    from reseller.security import authenticate
+    _,_,db,*_=setup
+    for _ in range(9):
+        assert authenticate(db,'admin','wrong-password','198.51.100.1') is None
+    assert authenticate(db,'admin','A-long-test-password!','198.51.100.1') is None
+    assert authenticate(db,'admin','A-long-test-password!','198.51.100.2')['username']=='admin'
+    assert not db.one("SELECT 1 x FROM audit WHERE outcome='limited'")
+
+
+def test_anonymous_sessions_are_capped(setup, monkeypatch):
+    from reseller import security
+    config,_,db,*_=setup
+    monkeypatch.setattr(security,'ANONYMOUS_SESSION_CAP',5)
+    for _ in range(12):
+        with db.transaction() as conn:
+            security.new_session(conn,config)
+    assert db.one('SELECT count(*) n FROM sessions WHERE user_id IS NULL')['n']==5
+
+
+def test_admin_can_delete_customer_of_expired_suspended_reseller(setup):
+    _,panel,db,service,admin,actor,_=setup
+    op=sale(service,actor)
+    with db.transaction() as conn:
+        conn.execute('UPDATE grants SET expires=starts+1 WHERE user_id=?',(actor['id'],))
+        conn.execute('UPDATE users SET suspended=1 WHERE id=?',(actor['id'],))
+        conn.execute('DELETE FROM permissions WHERE user_id=?',(actor['id'],))
+    with pytest.raises(RuleError):
+        service.reserve(dict(actor,suspended=0),{},str(uuid.uuid4()),'delete',op['customer_id'])
+    delete=service.reserve(admin,{},str(uuid.uuid4()),'delete',op['customer_id'])
+    service.execute(delete['id'])
+    assert db.one('SELECT status FROM operations WHERE id=?',(delete['id'],))['status']=='committed'
+    assert db.one('SELECT status FROM customers WHERE id=?',(op['customer_id'],))['status']=='deleted'
+    assert 'customer-one' not in panel.rows

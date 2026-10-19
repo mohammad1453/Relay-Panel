@@ -93,8 +93,11 @@ def main():
     elif args.command=='serve':
         import uvicorn
         from .web import create_app
+        # Behind the local Nginx proxy every request arrives from 127.0.0.1; trust
+        # the forwarded client address from loopback only so login rate limits
+        # apply per visitor. Public HTTP mode is reached directly and trusts nothing.
         uvicorn.run(create_app(config),host='0.0.0.0' if config.public_http else '127.0.0.1',port=int(os.getenv('APP_PORT','8095')),
-                    proxy_headers=False,access_log=False,workers=1)
+                    proxy_headers=not config.public_http,forwarded_allow_ips='127.0.0.1',access_log=False,workers=1)
 
 
 if __name__=='__main__':

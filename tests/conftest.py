@@ -99,7 +99,7 @@ class Panel:
 
 @pytest.fixture
 def setup(tmp_path):
-    config=Config(db=str(tmp_path/'app.db'),origin='http://testserver',production=False,xui_url='https://panel.invalid/base/',xui_token='fixture-server-secret')
+    config=Config(db=str(tmp_path/'app.db'),origin='http://testserver',production=False,xui_url='https://panel.invalid/base/',xui_token='fixture-server-secret',sub_url='https://sub.example.invalid/i/')
     panel=Panel()
     remote=XUI(config,httpx.MockTransport(panel))
     db=Database(config.db);db.migrate()

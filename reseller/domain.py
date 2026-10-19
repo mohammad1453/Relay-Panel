@@ -222,9 +222,17 @@ class Service:
             if not customer and actor['role'] != 'reseller':
                 raise RuleError('forbidden',403)
             owner = db.execute('SELECT * FROM users WHERE id=?',(uid,)).fetchone()
-            grant = active_grant(db, uid)  # Admin uses the same sales invariant.
-            if owner['suspended']:
-                raise RuleError('forbidden',403)
+            # An admin must be able to remove customers of an expired or suspended
+            # reseller. A delete charges nothing, so it needs no active plan.
+            admin_delete = kind == 'delete' and actor['role'] == 'admin'
+            if admin_delete:
+                grant = db.execute('SELECT * FROM grants WHERE user_id=? ORDER BY id DESC LIMIT 1',(uid,)).fetchone()
+                if not grant:
+                    raise RuleError('plan_expired',403)
+            else:
+                grant = active_grant(db, uid)  # Admin uses the same sales invariant.
+                if owner['suspended']:
+                    raise RuleError('forbidden',403)
             if customer and (customer['status'] != 'active' or customer['issue']):
                 raise RuleError('reconcile_required',409)
             if customer:
@@ -238,7 +246,7 @@ class Service:
                 previous_ids = []
                 payload = {}
             for iid in ids:
-                if not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(uid,iid)).fetchone():
+                if not admin_delete and not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(uid,iid)).fetchone():
                     raise RuleError('inbound_denied',403)
             if kind != 'delete':
                 self._valid_inbounds(db, ids)
@@ -370,7 +378,9 @@ class Service:
             owner=db.execute('SELECT suspended FROM users WHERE id=?',(local['user_id'],)).fetchone()
             original=db.execute('SELECT * FROM grants WHERE id=?',(op['grant_id'],)).fetchone()
             permitted=all(db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(local['user_id'],iid)).fetchone() for iid in desired['inboundIds'])
-            can_send=owner and not owner['suspended'] and original and not original['closed'] and original['expires']>now() and permitted
+            actor_row=db.execute('SELECT role FROM users WHERE id=?',(op['actor'],)).fetchone()
+            admin_delete=op['kind']=='delete' and actor_row and actor_row['role']=='admin'
+            can_send=bool(original and owner) and (admin_delete or not owner['suspended'] and not original['closed'] and original['expires']>now() and permitted)
             if can_send and op['kind']=='update':
                 desired['refund'] = self._refund_amount(db,local['user_id'],op['grant_id'],local['id'],
                                                         local['package'],desired['client']['totalGB'],used_bytes)

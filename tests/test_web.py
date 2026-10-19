@@ -72,7 +72,7 @@ def test_origin_rejection(client):
 
 def test_public_http_path_prefix(setup):
     config,_,_,service,*_=setup
-    config=replace(config,origin='http://203.0.113.10:8095',base_path='/relay-secret',public_http=True)
+    config=replace(config,origin='http://203.0.113.10:8095',base_path='/relay-secret',public_http=True,xui_database_paths='/etc/x-ui/x-ui.db')
     with TestClient(create_app(config,service.remote,background=False),base_url=config.origin) as prefixed:
         prefixed.cookies.set('relay_session','obsolete-root-cookie',path='/')
         assert prefixed.get('/login').status_code==404
@@ -190,3 +190,44 @@ def test_admin_suspension_disables_and_restores_reseller_customers(client,setup)
     response=client.post('/resellers/'+str(actor['id']),data={'csrf':token,'username':actor['username'],'inbounds':['1']},follow_redirects=False)
     assert response.status_code==303
     assert panel.rows[customer['email']]['enable'] is True
+
+
+def test_logout_revokes_server_session_with_base_path(setup):
+    config,_,_,service,*_=setup
+    config=replace(config,origin='http://203.0.113.10:8095',base_path='/relay-secret',public_http=True,xui_database_paths='/etc/x-ui/x-ui.db')
+    with TestClient(create_app(config,service.remote,background=False),base_url=config.origin) as prefixed:
+        page=prefixed.get('/relay-secret/login')
+        token=re.search(r'name="csrf" value="([^"]+)"',page.text).group(1)
+        prefixed.post('/relay-secret/login',data={'csrf':token,'username':'admin','password':'A-long-test-password!'},follow_redirects=False)
+        stolen=dict(prefixed.cookies)
+        account=prefixed.get('/relay-secret/account')
+        token=re.search(r'name="csrf" value="([^"]+)"',account.text).group(1)
+        assert prefixed.post('/relay-secret/logout',data={'csrf':token},follow_redirects=False).status_code==303
+        prefixed.cookies.clear()
+        for name,value in stolen.items():
+            prefixed.cookies.set(name,value,path='/relay-secret/')
+        assert prefixed.get('/relay-secret/',follow_redirects=False).status_code==303
+
+
+def test_subscription_link_uses_configured_url(client,setup):
+    _,_,_,service,_,actor,_=setup
+    op=sale(service,actor);login(client)
+    response=client.get('/customers/'+str(op['customer_id'])+'/links')
+    sub_id=setup[2].one('SELECT sub_id FROM customers WHERE id=?',(op['customer_id'],))['sub_id']
+    assert 'https://sub.example.invalid/i/'+sub_id in response.text
+    assert '1mo.us' not in response.text
+
+
+def test_subscription_link_hidden_when_unconfigured(setup):
+    config,_,_,service,_,actor,_=setup
+    op=sale(service,actor)
+    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
+        login(c)
+        response=c.get('/customers/'+str(op['customer_id'])+'/links')
+        assert response.status_code==200 and 'Subscription link' not in response.text
+
+
+def test_unknown_message_is_not_rendered(client):
+    login(client)
+    assert 'Call support at' not in client.get('/?message=Call+support+at+evil').text
+    assert 'role="status">' in client.get('/account?message=saved').text

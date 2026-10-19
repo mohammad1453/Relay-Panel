@@ -15,6 +15,7 @@ class Config:
     xui_username: str = ""
     xui_password: str = ""
     link_host: str = ""
+    sub_url: str = ""
     timezone: str = "Asia/Tehran"
     session_seconds: int = 43200
     idle_seconds: int = 1800
@@ -31,7 +32,8 @@ class Config:
                    production=os.getenv("APP_ENV", "production") == "production",
                    xui_url=os.getenv("XUI_URL", ""), xui_token=os.getenv("XUI_TOKEN", ""),
                    xui_username=os.getenv("XUI_USERNAME", ""), xui_password=os.getenv("XUI_PASSWORD", ""),
-                   link_host=os.getenv("XUI_LINK_HOST", ""), timezone=os.getenv("APP_TIMEZONE", "Asia/Tehran"),
+                   link_host=os.getenv("XUI_LINK_HOST", ""), sub_url=os.getenv("XUI_SUB_URL", ""),
+                   timezone=os.getenv("APP_TIMEZONE", "Asia/Tehran"),
                    session_seconds=int(os.getenv("SESSION_SECONDS", "43200")),
                    idle_seconds=int(os.getenv("SESSION_IDLE_SECONDS", "1800")),
                    sync_seconds=int(os.getenv("SYNC_SECONDS", "120")),
@@ -55,7 +57,10 @@ class Config:
                                any(part in ("", ".", "..") for part in self.base_path.split("/")[1:]) or
                                not all(c.isalnum() or c in "-_/" for c in self.base_path)):
             raise ValueError("APP_BASE_PATH must look like /relay-panel")
-        if self.production and not self.xui_database_paths:
+        # Public HTTP is reachable from the internet, so it keeps every
+        # configuration check that production mode has.
+        strict = self.production or self.public_http
+        if strict and not self.xui_database_paths:
             raise ValueError("Declare XUI_DATABASE_PATHS after inspecting the existing installation")
         raw_path = Path(self.db).absolute()
         path = raw_path.resolve()
@@ -70,8 +75,12 @@ class Config:
                 raise ValueError("Invalid XUI_URL")
             if url.scheme != "https" and not (url.scheme == "http" and url.hostname in ("localhost", "127.0.0.1", "::1")):
                 raise ValueError("XUI_URL requires HTTPS except on loopback")
-        if self.production and (not self.xui_url or not (self.xui_token or self.xui_username and self.xui_password)):
+        if strict and (not self.xui_url or not (self.xui_token or self.xui_username and self.xui_password)):
             raise ValueError("Configure master URL and authentication")
+        if self.sub_url:
+            sub = urlsplit(self.sub_url)
+            if sub.scheme != "https" or not sub.hostname or sub.username or sub.password or sub.query or sub.fragment:
+                raise ValueError("XUI_SUB_URL must be an HTTPS URL without credentials, query or fragment")
         if not 30 <= self.sync_seconds <= 86400 or not 1 <= self.connect_timeout <= self.timeout <= 120:
             raise ValueError("Invalid synchronization/timeout configuration")
         if not 60 <= self.idle_seconds <= self.session_seconds <= 604800:

@@ -20,7 +20,7 @@ from urllib.parse import quote, urlsplit
 from .config import Config
 from .db import Database, now, audit
 from .domain import Service, RuleError, GIB, PROTOCOLS, active_grant, owned, volume
-from .i18n import translator
+from .i18n import PAIRS, translator
 from .security import authenticate, digest, new_session, password_hash, verify
 from .xui import XUI, RemoteError
 
@@ -99,7 +99,7 @@ def create_app(config=None, remote=None, background=True):
             't':translator(lang),'lang':lang,'user':request.state.user,'csrf':request.state.csrf,
             'path':request.url.path,'number':number,'date':date,'gb':lambda b:number(round(b/GIB,3)) if b is not None else '—',
             'now':now(),'timezone':config.timezone,'operation_id':str(uuid.uuid4()),'writable':writable,'stale_after':config.sync_seconds*3,
-            'message':request.query_params.get('message',''),'PROTOCOLS':PROTOCOLS,'base_path':config.base_path,
+            'message':request.query_params.get('message','') if request.query_params.get('message','') in PAIRS else '','PROTOCOLS':PROTOCOLS,'base_path':config.base_path,
             'form_data':{},'inline_error':'',**context})
 
     def external(path):
@@ -247,7 +247,7 @@ def create_app(config=None, remote=None, background=True):
             response.status_code=401
             return response
         with db.transaction() as conn:
-            token,_=new_session(conn,config,user['id'],request.cookies.get('relay_session'))
+            token,_=new_session(conn,config,user['id'],request.cookies.get(cookie_name))
         response=RedirectResponse(external('/account' if user['must_change'] else '/'),303)
         cookie(response,token)
         return response
@@ -256,7 +256,7 @@ def create_app(config=None, remote=None, background=True):
     def logout(request:Request):
         user=require(request)
         with db.transaction() as conn:
-            conn.execute('DELETE FROM sessions WHERE token_hash=?',(digest(request.cookies.get('relay_session','')),))
+            conn.execute('DELETE FROM sessions WHERE token_hash=?',(digest(request.cookies.get(cookie_name,'')),))
             audit(conn,user['id'],'logout')
         response=RedirectResponse(external('/login'),303)
         response.delete_cookie(cookie_name,path=config.base_path+'/')
@@ -555,10 +555,12 @@ def create_app(config=None, remote=None, background=True):
         if not r or c['status']!='active' or not service._identity(c,r) or set(r['inboundIds'])!=ids:
             raise RuleError('remote_drift',409)
         links=remote.links(c['email'])
-        subscription_path='/i/'+quote(c['sub_id'],safe='')
+        sub_segment='/'+quote(c['sub_id'],safe='')
         def is_subscription_uri(link):
+            # Subscription URLs are shown separately; keep only per-inbound configuration URIs.
             try:
-                return urlsplit(link).path.rstrip('/')==subscription_path.rstrip('/')
+                parts=urlsplit(link)
+                return parts.scheme in ('http','https') and parts.path.rstrip('/').endswith(sub_segment)
             except ValueError:
                 return False
         links=list(dict.fromkeys(link for link in links if not is_subscription_uri(link)))
@@ -567,7 +569,7 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/customers/{cid}/links')
     def links(request:Request,cid:int):
         c,links=checked_links(require(request),cid)
-        subscription_link='https://sub.1mo.us/i/'+quote(c['sub_id'],safe='')
+        subscription_link=config.sub_url.rstrip('/')+'/'+quote(c['sub_id'],safe='') if config.sub_url else ''
         return render(request,'links.html',customer=c,links=links,subscription_link=subscription_link)
 
     @app.get('/operations')

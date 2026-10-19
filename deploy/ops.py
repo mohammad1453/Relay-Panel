@@ -203,6 +203,9 @@ def install(args):
         for value in original.split(','):
             if value!='external' and (Path(value).resolve()==DATA/'app.db' or not Path(value).is_absolute()):
                 fail('Original database path conflicts or is not absolute')
+        sub_url=input('Public subscription base URL, e.g. https://sub.example.com/i/ (blank to hide subscription links): ').strip()
+        if sub_url and not sub_url.startswith('https://'):
+            fail('Subscription URL must use HTTPS')
         token=getpass.getpass('Master admin API token (blank for username/password): ')
         username=input('Master username: ') if not token else ''
         password=getpass.getpass('Master password: ') if not token else ''
@@ -210,7 +213,7 @@ def install(args):
             fail('Master authentication is required')
         values={'APP_ENV':'public-http' if public_http else 'development' if tunnel_http else 'production','APP_ORIGIN':origin,'APP_BASE_PATH':base_path,'APP_DB':str(DATA/'app.db'),
                 'APP_PORT':str(args.port),'APP_TIMEZONE':'Asia/Tehran','XUI_DATABASE_PATHS':original,
-                'XUI_URL':url,'XUI_TOKEN':token,'XUI_USERNAME':username,'XUI_PASSWORD':password,'SYNC_SECONDS':'120'}
+                'XUI_URL':url,'XUI_SUB_URL':sub_url,'XUI_TOKEN':token,'XUI_USERNAME':username,'XUI_PASSWORD':password,'SYNC_SECONDS':'120'}
     # Ubuntu's apt hook may otherwise restart unrelated services automatically.
     package_env={**os.environ,'NEEDRESTART_MODE':'l','NEEDRESTART_SUSPEND':'1'}
     run(['apt-get','update'],env=package_env)
@@ -396,7 +399,7 @@ def configure_proxy(args,config):
     run(['openssl','x509','-in',args.tls_cert,'-noout','-checkhost',domain])
     run(['openssl','x509','-in',args.tls_cert,'-noout','-checkend','86400'])
     site=Path('/etc/nginx/conf.d/3xui-reseller.conf')
-    content='server {\n listen 443 ssl;\n server_name '+domain+';\n ssl_certificate '+args.tls_cert+';\n ssl_certificate_key '+args.tls_key+';\n client_max_body_size 64k;\n location / { proxy_pass http://127.0.0.1:'+config['APP_PORT']+'; proxy_set_header Host $host; proxy_read_timeout 120s; }\n}\n'
+    content='server {\n listen 443 ssl;\n server_name '+domain+';\n ssl_certificate '+args.tls_cert+';\n ssl_certificate_key '+args.tls_key+';\n client_max_body_size 64k;\n location / { proxy_pass http://127.0.0.1:'+config['APP_PORT']+'; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $remote_addr; proxy_set_header X-Forwarded-Proto https; proxy_read_timeout 120s; }\n}\n'
     if site.is_symlink():
         fail('Proxy file is a symlink; refusing changes')
     if site.exists():
