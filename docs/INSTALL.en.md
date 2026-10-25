@@ -88,7 +88,7 @@ Replace the example domain and paths. The tool checks DNS resolution, certificat
 
 ## First use
 
-1. Log in and change the initial password. Switch English/Persian in the sidebar.
+1. Log in and change the initial password.
 2. Open **Inbounds → Refresh from master**. Check names, IDs, protocol, ports and availability.
 3. Create a reseller with unique username/tag, password, GB grant, expiration and explicitly permitted inbounds.
 4. Sign in as that reseller and change its password.
@@ -151,7 +151,7 @@ This lists the exact paths and requires typing `PURGE 3XUI-RESELLER`. Save neede
 
 ## Troubleshooting and isolation verification
 
-Port conflict: choose a free `--port`; never stop the occupying service automatically. API 401/403: verify admin token scope or credentials. Wrong path/HTML: include the actual master web base path. TLS error: correct certificate/trust; TLS verification cannot be disabled. Pending operation: inspect **Operations & audit**, reconcile first, and use guarded admin repair only for a verified existing identity. A lost response with an absent client deliberately stays reserved.
+Port conflict: choose a free `--port`; never stop the occupying service automatically. API 401/403: verify admin token scope or credentials. Wrong path/HTML: include the actual master web base path. TLS error: correct certificate/trust; TLS verification cannot be disabled. Pending operation or changed customer: open **Needs attention**. Each item explains the problem and offers the safe actions (Check again, Send again, Mark as done, Accept 3X-UI values, Remove customer). A sent change whose client stays missing from 3X-UI for 3 syncs is cancelled automatically and its held data returned.
 
 Compare original panel service status/start time, unit-file hash and protected configuration hashes before/after installation. Do not expect a live panel database file hash to remain constant while traffic is being recorded.
 

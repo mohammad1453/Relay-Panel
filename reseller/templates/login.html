@@ -1,1 +1,21 @@
-{% extends 'base.html' %}{% block body %}<div class="auth"><span class="eyebrow">RELAY / {{ t('login') }}</span><h1>{{ t('welcome') }}</h1><p class="muted">{{ t('login_hint') }}</p>{% if login_error %}<p class="notice warning" role="alert">{{ t('invalid_login') }}</p>{% endif %}<form method="post" class="panel stack"><input type="hidden" name="csrf" value="{{ csrf }}"><label>{{ t('username') }}<input name="username" autocomplete="username" required maxlength="64" autofocus></label><label>{{ t('password') }}<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label><button class="primary" data-working="{{ t('working') }}">{{ t('login') }} →</button></form></div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('login') }}{% endblock %}
+{% block auth %}
+<div class="auth-card">
+  <div class="auth-brand"><span class="brand-mark lg">R</span><div><b>{{ t('brand') }}</b><small>{{ t('brand_sub') }}</small></div></div>
+  <h1>{{ t('welcome') }}</h1>
+  <p class="muted">{{ t('login_hint') }}</p>
+  {% if error %}{{ ui.alert('danger', t(error)) }}{% endif %}
+  {% if page_error %}{{ ui.alert('danger', t(page_error), false) }}{% endif %}
+  <form method="post" class="stack" novalidate>
+    {{ ui.csrf_field() }}
+    <label class="field">{{ t('username') }}
+      <span class="input-icon">{{ ui.icon('user') }}<input name="username" autocomplete="username" required maxlength="64" autofocus value="{{ form_data.get('username','') }}" {{ 'aria-invalid=true' if page_error }}></span>
+    </label>
+    <label class="field">{{ t('password') }}
+      <span class="input-icon">{{ ui.icon('lock') }}<input name="password" type="password" autocomplete="current-password" required maxlength="256" {{ 'aria-invalid=true' if page_error }}><button type="button" class="reveal" data-reveal title="{{ t('show') }}" aria-label="{{ t('show') }}">{{ ui.icon('eye') }}</button></span>
+    </label>
+    <button class="btn btn-primary btn-block" data-working="{{ t('working') }}">{{ ui.icon('login') }}<span>{{ t('login') }}</span></button>
+  </form>
+</div>
+{% endblock %}

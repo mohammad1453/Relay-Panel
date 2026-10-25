@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('activity') }}{% endblock %}
+{% block heading %}{{ t('activity') }}{% endblock %}
+{% block body %}
+<div class="page-head"><div><h1>{{ t('activity') }}</h1><p class="muted">{% if user.role=='admin' %}Everything that happened in Relay, newest first.{% else %}What you and Relay did with your customers, newest first.{% endif %}</p></div></div>
+<section class="card card-flush">
+  <div class="toolbar">
+    <nav class="chips" aria-label="Filter">
+      <a class="chip {{ 'chip-on' if not category }}" href="{{ link(type='', page='') }}">{{ t('all') }}</a>
+      {% for key,label in categories.items() %}<a class="chip {{ 'chip-on' if category==key }}" href="{{ link(type=key, page='') }}">{{ label }}</a>{% endfor %}
+    </nav>
+    {% if user.role=='admin' %}
+    <form class="search">
+      {% if category %}<input type="hidden" name="type" value="{{ category }}">{% endif %}
+      <select name="reseller" aria-label="{{ t('reseller') }}" data-autosubmit><option value="">All resellers</option>{% for r in resellers %}<option value="{{ r.id }}" {{ 'selected' if reseller==r.id|string }}>{{ r.username }}</option>{% endfor %}</select>
+      <label class="switch switch-sm"><input type="checkbox" name="technical" value="1" {{ 'checked' if technical }} data-autosubmit><span class="switch-track"></span><span>{{ t('technical') }}</span></label>
+    </form>
+    {% endif %}
+  </div>
+  <div class="card-pad">{{ ui.feed_list(feed, technical) }}</div>
+  {{ ui.pager(page, has_next) }}
+</section>
+{% endblock %}

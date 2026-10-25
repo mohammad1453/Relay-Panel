@@ -1,38 +1,94 @@
 {% extends 'base.html' %}
+{% block title %}{{ t('edit') if customer else t('new_customer') }}{% endblock %}
+{% block heading %}<a href="/customers" class="crumb">{{ t('customers') }}</a> / {{ display_name(customer.email) if customer else t('new_customer') }}{% endblock %}
 {% block body %}
-<div class="heading customer-form-heading">
-  <div><span class="eyebrow">{{ t('customers') }}</span><h1>{{ t('edit')+' · '+customer.email if customer else t('new_customer') }}</h1><p class="muted">{{ t('customer_form_hint') }}</p></div>
-  <a class="button" href="/customers">{{ t('cancel') }}</a>
+<div class="page-head">
+  <div><h1>{{ t('edit')+' '+display_name(customer.email) if customer else t('new_customer') }}</h1>
+  <p class="muted">{{ 'Change data, time or inbounds. Only the extra data you add is taken from your plan.' if customer else 'Fill in the details and press Create. The customer is ready in a few seconds.' }}</p></div>
+  <div class="actions-row"><a class="btn btn-ghost" href="{{ '/customers/'+customer.id|string if customer else '/customers' }}">{{ t('cancel') }}</a></div>
 </div>
-<form method="post" class="panel stack customer-form" id="customer-form">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
+<form method="post" class="form-layout" id="customer-form" novalidate>
+  {{ ui.csrf_field() }}
   <input type="hidden" name="operation_id" value="{{ operation_id }}">
-  <div class="tabs" role="tablist">
-    <button type="button" data-tab="basics" class="active" role="tab" aria-selected="true">{{ t('basics') }}</button>
-    <button type="button" data-tab="credentials" role="tab" aria-selected="false">{{ t('credentials') }}</button>
-  </div>
-  <section id="basics" class="tab-content" role="tabpanel">
-    <div class="form-grid customer-form-grid {{ 'customer-edit-grid' if customer else 'customer-create-grid' }}">
-      {% if not customer %}<div class="field-with-feedback email-field"><div class="field-feedback-spacer" aria-hidden="true"></div><label>{{ t('email') }}<input name="email" maxlength="64" required autocomplete="off" value="{{ form_data.get('email','') }}"></label></div>{% endif %}
-      <div class="field-with-feedback">
-        {% if quota_remaining is defined %}<div class="quota-feedback"><p id="quota-error" class="field-error" role="alert" {% if not inline_error %}hidden{% endif %}>{{ t('insufficient_quota_inline') }}</p><p class="field-hint" {% if inline_error %}hidden{% endif %}>{{ t('quota_available') }}: {{ number(quota_remaining) }} GB</p></div>{% endif %}
-        <label>{{ t('volume') }}<input id="customer-volume" name="volume" type="number" min="0.001" max="1000000" step="0.001" value="{{ form_data.get('volume',customer.package/1073741824 if customer else '') }}" required data-quota-gb="{{ quota_remaining if quota_remaining is defined else '' }}" data-check-quota="{{ 'true' if not customer else 'false' }}"></label>
+  <div class="form-main">
+    <section class="card">
+      <header class="card-head"><h2>{{ ui.icon('user') }} {{ t('customer_basics') }}</h2></header>
+      {% if not customer %}
+      <label class="field">{{ t('email') }}
+        <input name="email" maxlength="64" required autocomplete="off" spellcheck="false" placeholder="ali-phone" value="{{ v.email }}" {{ ui.invalid('email') }}>
+        <small class="hint">{{ t('email_hint') }}</small>
+        {{ ui.field_error('email') }}
+      </label>
+      {% endif %}
+      <label class="field">{{ t('comment') }}
+        <textarea name="comment" maxlength="1000" rows="2" placeholder="e.g. Ali's phone, paid until June">{{ v.comment }}</textarea>
+        <small class="hint">{{ t('comment_hint') }}</small>
+      </label>
+      <label class="switch"><input type="checkbox" name="enable" {{ 'checked' if v.enable }}><span class="switch-track"></span><span>{{ t('enable_customer') }}</span></label>
+    </section>
+
+    <section class="card">
+      <header class="card-head"><h2>{{ ui.icon('data') }} {{ t('data_and_time') }}</h2></header>
+      <label class="field">{{ t('volume') }}
+        <span class="input-suffix"><input id="customer-volume" name="volume" type="number" inputmode="decimal" min="0.01" max="1000000" step="0.01" required value="{{ v.volume }}"
+          data-quota-gb="{{ quota_remaining }}" data-current-gb="{{ (customer.package/1073741824) if customer else 0 }}" {{ ui.invalid('volume') }}><span>GB</span></span>
+        <span class="quick">{% for n in quick_volumes %}<button type="button" class="chip" data-fill="customer-volume" data-value="{{ n }}">{{ n }} GB</button>{% endfor %}</span>
+        {{ ui.field_error('volume') }}
+        <p class="field-error" id="quota-error" hidden>{{ t('insufficient_quota') }}</p>
+      </label>
+      <label class="switch"><input type="checkbox" name="first_use" id="first-use" {{ 'checked' if v.first_use }}><span class="switch-track"></span><span>{{ t('first_use') }}</span></label>
+      <div class="field" id="fixed-expiry">
+        <label for="expiry-input">{{ t('expiry_date') }}</label>
+        <input id="expiry-input" name="expiry" type="datetime-local" value="{{ v.expiry }}" {{ ui.invalid('expiry') }}>
+        <span class="quick">{% for d in quick_days %}<button type="button" class="chip" data-add-days="{{ d }}" data-target="expiry-input">+{{ d }} {{ t('days_unit') }}</button>{% endfor %}</span>
       </div>
-      <label id="fixed-expiry">{{ t('expiry') }}<input name="expiry" type="datetime-local" value="{{ form_data.get('expiry',expiry_input or '') }}"></label>
-      <label id="duration">{{ t('days') }}<input name="days" type="number" min="1" max="3650" value="{{ form_data.get('days',(-p.expiryTime/86400000)|int if p.get('expiryTime',0)<0 else 30) }}"></label>
-      <label class="check form-check first-use-option" id="first-use-option"><input type="checkbox" name="first_use" id="first-use" {{ 'checked' if form_data.get('first_use',p.get('expiryTime',0)<0) }}>{{ t('first_use') }}</label>
-      <label class="wide">{{ t('comment') }}<textarea name="comment" maxlength="1000">{{ form_data.get('comment',p.get('comment','')) }}</textarea></label>
-    </div>
-    <section class="inbounds-section"><h2>{{ t('allowed') }}</h2><p class="muted">{{ t('homogeneous') }}</p><fieldset class="inbounds-fieldset" aria-label="{{ t('allowed') }}"><div class="inbound-grid">
-      {% for i in inbounds %}{% if i.protocol in PROTOCOLS and (i.available or i.id in selected) %}<label class="inbound check"><input type="checkbox" name="inbounds" value="{{ i.id }}" data-protocol="{{ i.protocol }}" {{ 'checked' if i.id in selected }}><span><b>{{ i.name or t('unnamed_inbound') }}</b></span></label>{% endif %}{% else %}<p>{{ t('inbound_unavailable') }}</p>{% endfor %}
-    </div></fieldset></section>
-  </section>
-  <section id="credentials" class="tab-content" role="tabpanel" hidden>
-    <p class="muted">{{ t('keep_credential' if customer else 'auto_keys') }}</p>
-    <div class="form-grid"><label>{{ t('uuid') }}<input name="uuid" autocomplete="off" value="{{ form_data.get('uuid','') }}"></label><label>{{ t('sub_id') }}<input name="sub_id" autocomplete="off" value="{{ form_data.get('sub_id','') }}"></label><label data-protocols="trojan tuic hysteria">{{ t('credential') }}<input name="credential" maxlength="128" autocomplete="off" value="{{ form_data.get('credential','') }}"></label></div>
-    <p class="muted">{{ t('auto_keys') }}</p>
-  </section>
-  <label class="check form-check enabled-option"><input type="checkbox" name="enable" {{ 'checked' if form_data.get('enable',p.get('enable',true)) }}>{{ t('enabled') }}</label>
-  <div class="form-footer"><a class="button ghost" href="/customers">{{ t('cancel') }}</a><button class="primary" data-working="{{ t('working') }}">{{ t('save' if customer else 'create') }} →</button></div>
+      <div class="field" id="duration">
+        <label for="days-input">{{ t('days') }}</label>
+        <span class="input-suffix"><input id="days-input" name="days" type="number" min="1" max="3650" value="{{ v.days }}" {{ ui.invalid('expiry') }}><span>{{ t('days_unit') }}</span></span>
+        <span class="quick">{% for d in quick_days %}<button type="button" class="chip" data-fill="days-input" data-value="{{ d }}">{{ d }} {{ t('days_unit') }}</button>{% endfor %}</span>
+      </div>
+      {{ ui.field_error('expiry') }}
+    </section>
+
+    <section class="card">
+      <header class="card-head"><h2>{{ ui.icon('server') }} {{ t('inbounds_for_customer') }}</h2></header>
+      <p class="muted">{{ t('pick_inbounds') }}</p>
+      {{ ui.field_error('inbounds') }}
+      <div class="choice-grid" role="group" aria-label="{{ t('inbounds_for_customer') }}">
+        {% for i in inbounds %}{% if i.protocol in PROTOCOLS and (i.available or i.id in selected) %}
+        <label class="choice {{ 'choice-off' if not i.available }}">
+          <input type="checkbox" name="inbounds" value="{{ i.id }}" data-protocol="{{ i.protocol }}" {{ 'checked' if i.id in selected }}>
+          <span class="choice-body"><b>{{ i.name or t('unnamed_inbound') }}</b><small><span class="tag tag-proto">{{ i.protocol }}</span> port {{ i.port }}{% if not i.available %} · {{ t('unavailable') }}{% endif %}</small></span>
+          <span class="choice-check">{{ ui.icon('check') }}</span>
+        </label>
+        {% endif %}{% else %}
+        <div class="empty small">{{ ui.icon('server') }}<p>No inbounds are assigned to this reseller yet. Ask the admin to allow one.</p></div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <details class="card details" {{ 'open' if field_errors.get('sub_id') or v.uuid or v.sub_id or v.credential }}>
+      <summary><span>{{ ui.icon('key') }} {{ t('advanced') }}</span><small class="muted">{{ t('keep_credential') if customer else t('advanced_hint') }}</small></summary>
+      <div class="grid-3">
+        <label class="field" data-protocols="vmess vless tuic">{{ t('uuid') }}<input name="uuid" autocomplete="off" spellcheck="false" value="{{ v.uuid }}"></label>
+        <label class="field">{{ t('sub_id') }}<input name="sub_id" autocomplete="off" spellcheck="false" value="{{ v.sub_id }}" {{ ui.invalid('sub_id') }}>{{ ui.field_error('sub_id') }}</label>
+        <label class="field" data-protocols="trojan tuic hysteria">{{ t('credential') }}<input name="credential" maxlength="128" autocomplete="off" spellcheck="false" value="{{ v.credential }}"></label>
+      </div>
+    </details>
+  </div>
+
+  <aside class="form-side">
+    <section class="card summary">
+      <h2>Summary</h2>
+      <dl class="kv">
+        <div><dt>{{ t('quota_available') }}</dt><dd><b>{{ number(quota_remaining|round(2)) }} GB</b></dd></div>
+        <div><dt>{{ 'Extra data needed' if customer else 'This customer' }}</dt><dd><b id="summary-cost">—</b></dd></div>
+        <div><dt>{{ t('remaining_after') }}</dt><dd><b id="summary-left">—</b></dd></div>
+        {% if plan %}<div><dt>{{ t('plan_expires') }}</dt><dd>{{ date(plan.expires) }}</dd></div>{% endif %}
+      </dl>
+      <button class="btn btn-primary btn-block" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') if customer else t('create') }}</span></button>
+      <a class="btn btn-ghost btn-block" href="{{ '/customers/'+customer.id|string if customer else '/customers' }}">{{ t('cancel') }}</a>
+    </section>
+  </aside>
 </form>
 {% endblock %}

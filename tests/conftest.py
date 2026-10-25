@@ -20,6 +20,7 @@ class Panel:
         self.rows={}
         self.inbounds=[{'id':i,'remark':f'Inbound {i}','protocol':p,'port':440+i,'enable':True,'settings':{'clients':[]},'streamSettings':{}} for i,p in enumerate(['vless','vless','trojan','vmess','shadowsocks','hysteria','wireguard','amneziawg','mtproto','tuic','http'],1)]
         self.mode='ok'
+        self.online=set()
         self.calls=[]
         self.count=0
 
@@ -51,7 +52,7 @@ class Panel:
             if path=='clients/list':
                 return self.response(list(copy.deepcopy(self.rows).values()))
             if path=='clients/onlines':
-                return self.response([])
+                return self.response(sorted(self.online))
             if path.startswith('clients/links/'):
                 return self.response(['vless://fixture@example.invalid:443?security=tls#fixture'])
             if path.startswith('clients/subLinks/'):

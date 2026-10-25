@@ -2,10 +2,13 @@
 
 Self-hosted FastAPI/Jinja application for **MHSanaei/3x-ui v3.8.5**, using its central client API. A dedicated SQLite database owns reseller identity, permissions, sessions, operations and cumulative sales. The master panel owns VPN configuration and telemetry.
 
+![Admin dashboard](docs/screenshots/admin-dashboard.png)
+
 **Status:** implemented and tested locally with version-specific API fixtures. It has not been connected to your panel or installed on your VPS. Read [verification and remaining limits](docs/VERIFICATION.md) before production rollout.
 
 - [English installation guide](docs/INSTALL.en.md)
-- [راهنمای نصب فارسی](docs/INSTALL.fa.md)
+- [Upgrading an existing install](docs/UPGRADE.md)
+- [راهنمای نصب فارسی](docs/INSTALL.fa.md) (installation only; the panel itself is English)
 - [Verified API contract](docs/API-3.8.5.md)
 - [Architecture and recovery](docs/ARCHITECTURE.md)
 - [Security and deployment limits](docs/VERIFICATION.md)
@@ -53,7 +56,8 @@ An explicit compatibility mode can publish Relay like 3X-UI at `http://VPS_IP:PO
 `reseller/security.py`: Argon2id, session rotation, persistent rate limiting.
 `reseller/domain.py`: ownership, grants, ledger, reservations, reconciliation.
 `reseller/xui.py`: bounded, TLS-verified, server-only v3.8.5 API adapter.
-`reseller/web.py`, `templates`, `static`, `i18n.py`: session-authenticated bilingual UI.
+`reseller/web.py`, `templates`, `static`, `i18n.py`: session-authenticated English UI with inline errors.
+`reseller/activity.py`: turns audit and ledger rows into plain sentences.
 `reseller/migrations`: ordered database schema (application ID and version checked).
 `deploy/ops.py`: installation, update, backup, restore, status, uninstall.
 `tests`: accounting, authorization, integration and isolated maintenance tests.

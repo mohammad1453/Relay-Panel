@@ -1,2 +1,68 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><div><span class="eyebrow">RELAY / {{ t('customers') }}</span><h1>{{ t('customers') }}</h1></div>{% if user.role=='reseller' and writable %}<a class="button primary" href="/customers/new">＋ {{ t('new_customer') }}</a>{% endif %}</div><form class="filters"><input name="q" value="{{ q }}" placeholder="{{ t('search') }}" aria-label="{{ t('search') }}"><select name="enable" aria-label="{{ t('enabled') }}"><option value="">{{ t('enabled') }} · {{ t('all') }}</option>{% for v,label in [('1','enabled'),('0','disabled')] %}<option value="{{ v }}" {{ 'selected' if filters.get('enable')==v }}>{{ t(label) }}</option>{% endfor %}</select><select name="online" aria-label="{{ t('online') }}"><option value="">{{ t('online') }} · {{ t('all') }}</option>{% for v,label in [('1','online'),('0','offline')] %}<option value="{{ v }}" {{ 'selected' if filters.get('online')==v }}>{{ t(label) }}</option>{% endfor %}</select><select name="inbound" aria-label="{{ t('inbounds') }}"><option value="">{{ t('inbounds') }} · {{ t('all') }}</option>{% for i in inbounds %}<option value="{{ i.id }}" {{ 'selected' if filters.get('inbound')==i.id|string }}>{{ i.name or t('unnamed_inbound') }}</option>{% endfor %}</select><select name="status" aria-label="{{ t('status') }}"><option value="">{{ t('status') }} · {{ t('all') }}</option>{% for v in ['active','pending','failed','deleted'] %}<option value="{{ v }}" {{ 'selected' if filters.get('status')==v }}>{{ t(v) }}</option>{% endfor %}</select><select name="sort" aria-label="{{ t('sort') }}">{% for v in ['created','email','package'] %}<option value="{{ v }}" {{ 'selected' if filters.get('sort')==v }}>{{ t(v) }}</option>{% endfor %}</select><label class="check"><input type="checkbox" name="expired" value="1" {{ 'checked' if filters.get('expired')=='1' }}>{{ t('expired') }}</label><button>{{ t('apply') }}</button></form>
-<section class="panel table-wrap"><table><thead><tr><th>{{ t('actions') }}</th><th>{{ t('enabled') }}</th><th>{{ t('online') }}</th><th>{{ t('email') }}</th><th>{{ t('comment') }}</th><th>{{ t('inbounds') }}</th><th>{{ t('usage') }}</th><th>{{ t('customer_remaining') }}</th><th>{{ t('speed') }}</th><th>{{ t('expiry') }}</th></tr></thead><tbody>{% for c in rows %}<tr><td><a href="/customers/{{ c.id }}">{{ t('details') }} ↗</a></td><td><span class="dot {{ 'on' if c.p.enable and c.status=='active' }}"></span>{{ t(c.status) }}</td><td><span class="badge">{{ t('waiting_telemetry' if not c.telemetry_at else 'unknown' if c.stale or c.online==none else 'online' if c.online else 'offline') }}</span></td><td><strong>{{ c.email }}</strong>{% if user.role=='admin' %}<small>{{ c.owner }}</small>{% endif %}{% if c.issue %}<small class="danger">{{ t(c.issue) }}</small>{% endif %}</td><td class="comment">{{ c.p.comment }}</td><td>{{ number(c.inbounds) }}</td><td>{{ '—' if c.stale else gb(c.used) }} / {{ gb(c.package) }} GB</td><td>{{ '—' if c.stale or c.used==none else gb([0,c.package-c.used]|max) }} GB</td><td>—</td><td>{{ date((c.remote_expiry or c.p.expiryTime)/1000) if (c.remote_expiry or c.p.expiryTime)>0 else t('first_use') }}</td></tr>{% else %}<tr><td colspan="10" class="empty">◎<br>{{ t('empty') }}</td></tr>{% endfor %}</tbody></table></section><div class="pagination">{% if page>1 %}<a href="{{ request.url.include_query_params(page=page-1) }}">{{ t('previous') }}</a>{% endif %}<span>{{ number(page) }}</span>{% if rows|length==25 %}<a href="{{ request.url.include_query_params(page=page+1) }}">{{ t('next') }}</a>{% endif %}</div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('customers') }}{% endblock %}
+{% block heading %}{{ t('customers') }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>{{ t('customers') }}</h1><p class="muted">{% if user.role=='admin' %}All customers of all resellers.{% else %}Everyone you sold a package to.{% endif %}</p></div>
+  {% if user.role=='reseller' and writable %}<div class="actions-row"><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
+</div>
+<section class="card card-flush">
+  <div class="toolbar">
+    <nav class="chips" aria-label="Filter">
+      {% for key,label in [('','filter_all'),('active','filter_active'),('online','filter_online'),('disabled','filter_disabled'),('expired','filter_expired'),('attention','filter_attention'),('removed','filter_removed')] %}
+      <a class="chip {{ 'chip-on' if view==key }}" href="{{ link(view=key, page='') }}">{{ t(label) }}</a>
+      {% endfor %}
+    </nav>
+    <form class="search" role="search">
+      {% if view %}<input type="hidden" name="view" value="{{ view }}">{% endif %}
+      <span class="input-icon">{{ ui.icon('search') }}<input name="q" value="{{ q }}" placeholder="{{ t('search_customers') }}" aria-label="{{ t('search_customers') }}"></span>
+      {% if user.role=='admin' and owners %}
+      <select name="owner" aria-label="{{ t('owner') }}" data-autosubmit><option value="">All resellers</option>{% for o in owners %}<option value="{{ o.id }}" {{ 'selected' if filters.get('owner')==o.id|string }}>{{ o.username }}</option>{% endfor %}</select>
+      {% endif %}
+      {% if inbounds %}<select name="inbound" aria-label="{{ t('inbounds') }}" data-autosubmit><option value="">All inbounds</option>{% for i in inbounds %}<option value="{{ i.id }}" {{ 'selected' if filters.get('inbound')==i.id|string }}>{{ i.name or t('unnamed_inbound') }}</option>{% endfor %}</select>{% endif %}
+      <select name="sort" aria-label="{{ t('sort') }}" data-autosubmit>{% for v,l in [('created','Newest'),('email','Name'),('usage','Most used'),('package','Biggest')] %}<option value="{{ v }}" {{ 'selected' if filters.get('sort','created')==v }}>{{ l }}</option>{% endfor %}</select>
+      <button class="btn btn-ghost">{{ t('search') }}</button>
+    </form>
+  </div>
+  {% if rows %}
+  <div class="table-wrap"><table class="table table-cards">
+    <thead><tr><th>{{ t('customer') }}</th><th>{{ t('status') }}</th><th>{{ t('usage') }}</th><th>{{ t('expiry') }}</th><th>{{ t('inbounds') }}</th><th class="actions-col"><span class="sr">{{ t('details') }}</span></th></tr></thead>
+    <tbody>
+    {% for c in rows %}
+    <tr>
+      <td data-label="{{ t('customer') }}">
+        <div class="cell-main">
+          <span class="online-dot {{ 'on' if c.online and not c.stale and c.status=='active' else '' }}" title="{{ t('online') if c.online and not c.stale else t('offline') }}"></span>
+          <div><a class="strong-link" href="/customers/{{ c.id }}">{{ display_name(c.email) }}</a>
+          {% if c.p.comment %}<small class="muted clip">{{ c.p.comment }}</small>{% endif %}
+          {% if user.role=='admin' %}<small class="muted">{{ ui.icon('user','icon-xs') }} {{ c.owner }}</small>{% endif %}</div>
+        </div>
+      </td>
+      <td data-label="{{ t('status') }}">{{ ui.tag(c.state, c.tone) }}</td>
+      <td data-label="{{ t('usage') }}" class="usage-cell">
+        <div class="bar-label"><span>{{ gb(c.used) if c.used is not none else '0' }} / {{ gb(c.package) }} GB</span><small class="muted">{{ c.percent }}%</small></div>
+        {{ ui.progress(c.used or 0, c.package) }}
+      </td>
+      <td data-label="{{ t('expiry') }}">{% set ms = c.remote_expiry or c.p.expiryTime %}<span title="{{ date(ms/1000) if ms and ms>0 else '' }}">{{ expiry_text(ms) }}</span></td>
+      <td data-label="{{ t('inbounds') }}"><div class="tags">{% for n in c.inbound_names[:2] %}<span class="tag tag-outline">{{ n }}</span>{% endfor %}{% if c.inbound_names|length>2 %}<span class="tag tag-outline">+{{ c.inbound_names|length-2 }}</span>{% endif %}{% if not c.inbound_names and c.status=='active' %}<span class="tag tag-warning">None</span>{% endif %}</div></td>
+      <td class="actions-col">
+        <div class="row-actions">
+          {% if c.status=='active' %}<a class="btn-icon" href="/customers/{{ c.id }}/links" title="{{ t('links') }}" aria-label="{{ t('links') }}">{{ ui.icon('link') }}</a>
+          <a class="btn-icon" href="/customers/{{ c.id }}/edit" title="{{ t('edit') }}" aria-label="{{ t('edit') }}">{{ ui.icon('edit') }}</a>{% endif %}
+          {% if c.status!='deleted' and (user.role=='admin' or writable) %}
+          <form method="post" action="/customers/{{ c.id }}/delete">{{ ui.csrf_field() }}<input type="hidden" name="operation_id" value="{{ new_id() }}">{{ ui.icon_confirm(t('delete')) }}</form>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {{ ui.pager(page, rows|length==25) }}
+  {% elif any_customers %}
+  {{ ui.empty('search', t('no_results')) }}
+  {% else %}
+  {{ ui.empty('customers', t('no_customers'), '/customers/new' if user.role=='reseller' and writable else None, t('new_customer')) }}
+  {% endif %}
+</section>
+{% endblock %}

@@ -56,6 +56,21 @@ def active_grant(db, user_id):
     return row
 
 
+DELETED_MARK = '~deleted-'
+
+
+def display_name(email):
+    """Customer name without the suffix added when it was deleted."""
+    return str(email).split(DELETED_MARK)[0]
+
+
+def free_customer_name(db, customer_id):
+    """After a delete, release the name and credentials so they can be used again."""
+    db.execute("UPDATE customers SET email=email||?||id,sub_id=sub_id||?||id,uuid=NULL,remote_id=NULL WHERE id=? AND instr(email,?)=0",
+               (DELETED_MARK,DELETED_MARK,customer_id,DELETED_MARK))
+    db.execute('DELETE FROM identities WHERE customer_id=?',(customer_id,))
+
+
 def owned(db, actor, customer_id):
     row = db.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone()
     if not row or (actor['role'] != 'admin' and row['user_id'] != actor['id']):
@@ -590,6 +605,8 @@ class Service:
                 db.execute('UPDATE customers SET status=?,payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue=? WHERE id=?',
                            ('deleted' if op['kind']=='delete' else 'active',dumps(payload),payload['totalGB'] or local['package'],remote['id'] if remote else local['remote_id'],payload.get('id'),payload['subId'],'',local['id']))
                 db.execute("DELETE FROM state WHERE key IN (?,?)",(f"drift:{local['id']}",f"absent:{oid}"))
+                if op['kind']=='delete':
+                    free_customer_name(db, local['id'])
                 db.execute("UPDATE operations SET status='committed',diagnostic='',updated=? WHERE id=?",(now(),oid))
                 audit(db,op['actor'],'customer_'+op['kind'],local['id'])
         except RemoteError as exc:
@@ -648,6 +665,7 @@ class Service:
             db.execute("UPDATE operations SET status='failed',diagnostic=?,updated=? WHERE id=?",(reason,now(),oid))
             db.execute("UPDATE customers SET status='deleted',issue='remote_missing',online=NULL WHERE id=?",(c['id'],))
             db.execute("DELETE FROM state WHERE key IN (?,?,?)",(f'absent:{oid}',f"drift:{c['id']}",f"customer_enable:{c['id']}"))
+            free_customer_name(db, c['id'])
             audit(db,None,'customer_removed_during_setup',c['id'],reason)
 
     def _refresh(self):
@@ -694,6 +712,7 @@ class Service:
                 if not remote and not pending:
                     db.execute("UPDATE customers SET status='deleted',issue='remote_missing',online=NULL,telemetry_at=?,remote_expiry=NULL WHERE id=?",(now(),local['id']))
                     db.execute('DELETE FROM state WHERE key=?',(f"customer_enable:{local['id']}",))
+                    free_customer_name(db, local['id'])
                     audit(db,None,'customer_remote_missing',local['id'],'remote_missing')
                 else:
                     db.execute('UPDATE customers SET issue=?,used=coalesce(?,used),online=?,telemetry_at=?,remote_expiry=? WHERE id=?',
@@ -888,6 +907,7 @@ class Service:
                 self._entry(db,local['user_id'],op['grant_id'],customer_id,op['id'],'release',op['charge'],actor['id'])
                 db.execute("UPDATE operations SET status='failed',diagnostic='cancelled',updated=? WHERE id=?",(now(),op['id']))
             db.execute("UPDATE customers SET status='deleted',issue='',online=NULL WHERE id=?",(customer_id,))
+            free_customer_name(db, customer_id)
             db.execute('DELETE FROM state WHERE key IN (?,?)',(f'drift:{customer_id}',f'customer_enable:{customer_id}'))
             audit(db,actor['id'],'customer_force_removed',customer_id,'ok' if remote else 'already_missing')
 

@@ -13,13 +13,19 @@ A single Uvicorn process serves FastAPI/Jinja routes and a background reconcilia
 
 Delete, disable, and expiry never create refunds. On a verified customer limit reduction, Relay returns the decrease that remains unused: `max(0, old allowance - max(new allowance, measured usage))`. Refunds are capped at the customer's net sales on the active grant and the grant's sold balance. For example, reducing 100 GB to 70 GB with 10 GB used returns 30 GB; reducing to 5 GB with 80 GB used returns 20 GB. An increase is charged by its positive difference. Plan renewals close the previous grant and create a fresh one; outstanding operations retain their original grant attribution. The immutable ledger and audit history survive deletion and renewal.
 
-During synchronization, an active local customer absent from the master client's list is soft-deleted and logged as a system audit event. Relay hides it from the default customer list while retaining its record, operations, and accounting history. Missing customers do not trigger quota refunds.
+During synchronization, an active local customer absent from the master client's list is soft-deleted and logged as a system audit event. Relay hides it from the default customer list while retaining its record, operations, and accounting history, and frees its name, subscription ID and credentials for reuse. Missing customers do not trigger quota refunds.
+
+Inbounds deleted in the master are deleted from Relay in the same sync, together with reseller permissions and customer placements that pointed at them; pending operations drop the removed inbound from their desired state. An empty inbound list is only trusted when two syncs in a row return it.
 
 ## Remote failures and drift
 
 Operations expose reserved/sent/uncertain/committed/failed statuses plus per-inbound results. Production exceptions expose short translated codes only. A disappeared or changed remote record blocks unsafe writes. The master administrator must avoid editing a managed identity during an application mutation: the upstream API offers no compare-and-swap transaction spanning a remote read and write. The application cannot eliminate that external administrator race; it checks before and after.
 
-If an uncertain creation is absent, do not delete its operation or release quota on the assumption it failed. Establish that the master request has finished, inspect all expected inbounds and logs, and resolve the remote state under operator supervision. No one-click refund override exists. This deliberately conservative case may require database-level recovery by a qualified administrator; preserve a backup and the audit trail. A future proven-failure workflow should require authoritative remote completion evidence.
+A sent create or update whose client is absent from the master on three full syncs at least 20 seconds apart is finished as failed: its reservation is released, the customer is marked deleted and a system event explains it. A request still in flight would normally land within that window; if a late request does create the client afterwards, it appears in 3X-UI as an unmanaged client.
+
+Customers edited directly in the master are marked `remote_changed` (values or inbounds) or `remote_identity` (record, subscription ID, UUID or group). Relay stores a snapshot of the master copy so the admin sees a field-by-field comparison. "Accept 3X-UI values" copies the master copy into Relay without charging or refunding the reseller (a zero-amount ledger note is written). The admin's delete removes the client from the master if present and cancels pending operations, returning held quota. Deleting a reseller deletes all of its customers first, then retires the account (renamed, suspended, permissions and sessions removed) because ledger and audit rows are permanent.
+
+Changes the master accepted with `nodePending` are committed once the master copy matches and at least two sync intervals (minimum 60 seconds) have passed; the admin can also mark an operation as done after checking it.
 
 ## Backup and restore
 

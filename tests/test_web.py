@@ -1,6 +1,8 @@
+import json
 import re
 import uuid
 from dataclasses import replace
+from urllib.parse import parse_qs, urlsplit
 from fastapi.testclient import TestClient
 import pytest
 from reseller.web import create_app
@@ -21,6 +23,12 @@ def login(client,username='reseller',password='A-long-test-password!'):
     return csrf(client,'/account')
 
 
+def error_of(response):
+    """The ?error= code a redirect carries back to the page."""
+    assert response.status_code==303,response.text
+    return parse_qs(urlsplit(response.headers['location']).query).get('error',[''])[0]
+
+
 @pytest.fixture
 def client(setup):
     config,_,_,service,*_=setup
@@ -30,8 +38,9 @@ def client(setup):
 
 def test_unauthenticated_redirect_and_csrf(client):
     assert client.get('/customers',follow_redirects=False).status_code==303
-    assert client.post('/login',data={'username':'admin','password':'x'}).status_code==403
-    assert client.post('/customers/new').status_code==403
+    response=client.post('/login',data={'username':'admin','password':'x'},follow_redirects=False)
+    assert error_of(response)=='session_expired' and response.headers['X-Relay-Session-Error']
+    assert client.post('/customers/new',follow_redirects=False).status_code==303
 
 
 def test_session_rotation_logout_and_headers(client):
@@ -49,25 +58,31 @@ def test_session_rotation_logout_and_headers(client):
 
 def test_reseller_cannot_access_admin(client):
     token=login(client)
-    for route in ['/resellers','/resellers/new','/operations','/inbounds']:
-        assert client.get(route).status_code==403
-    for route in ['/sync','/resellers/new','/resellers/1/renew']:
-        assert client.post(route,data={'csrf':token}).status_code==403
+    for route in ['/resellers','/resellers/new','/attention','/inbounds']:
+        response=client.get(route)
+        assert response.status_code==403
+        assert 'have access to this.' in response.text
+    for route in ['/resellers/new','/resellers/1/renew','/resellers/1/delete','/customers/1/accept']:
+        assert error_of(client.post(route,data={'csrf':token},follow_redirects=False))=='forbidden'
 
 
 def test_cross_account_read_and_mutation(client,setup):
     _,_,_,service,_,actor,_=setup
     op=sale(service,actor)
     token=login(client,'other','Another-test-password!')
-    for suffix in ['', '/edit','/links','/qr/connection/0']:
-        assert client.get('/customers/'+str(op['customer_id'])+suffix).status_code==404
-    assert client.post('/customers/'+str(op['customer_id'])+'/delete',data={'csrf':token,'operation_id':str(uuid.uuid4())}).status_code==404
+    for suffix in ['', '/edit','/links']:
+        response=client.get('/customers/'+str(op['customer_id'])+suffix)
+        assert response.status_code==404 and 'This item does not exist' in response.text
+    response=client.post('/customers/'+str(op['customer_id'])+'/delete',data={'csrf':token,'operation_id':str(uuid.uuid4())},follow_redirects=False)
+    assert error_of(response)=='not_found'
 
 
 def test_origin_rejection(client):
     token=login(client)
-    assert client.post('/logout',data={'csrf':token},headers={'Origin':'https://evil.invalid'}).status_code==403
-    assert client.post('/logout',data={'csrf':token},headers={'Origin':'null'}).status_code==403
+    for origin in ('https://evil.invalid','null'):
+        response=client.post('/logout',data={'csrf':token},headers={'Origin':origin},follow_redirects=False)
+        assert error_of(response)=='session_expired'
+    assert client.get('/',follow_redirects=False).status_code==200
 
 
 def test_public_http_path_prefix(setup):
@@ -87,25 +102,43 @@ def test_public_http_path_prefix(setup):
         cookies=response.headers.get_list('set-cookie')
         assert any('Max-Age=0' in value and 'Path=/' in value for value in cookies)
         assert any('relay_session_' in value and 'Path=/relay-secret/' in value and 'Max-Age=43200' in value for value in cookies)
+        # Filter and paging links keep the base path once the browser script prefixes them.
+        page=prefixed.get('/relay-secret/customers?view=active')
+        assert 'href="/customers?view=online"' in page.text
+        # Errors redirect back below the base path.
+        token=re.search(r'name="csrf" value="([^"]+)"',page.text).group(1)
+        response=prefixed.post('/relay-secret/customers/999/delete',data={'csrf':token},headers={'Referer':config.origin+'/relay-secret/customers'},follow_redirects=False)
+        assert response.headers['location'].startswith('/relay-secret/customers?error=')
 
 
 def test_oversized_and_too_many_fields(client):
-    assert client.post('/login',content=b'x'*65537).status_code==413
-    assert client.post('/login',content=b'k=v&'*101).status_code==403
+    assert error_of(client.post('/login',content=b'x'*65537,follow_redirects=False))=='too_large'
+    assert error_of(client.post('/login',content=b'k=v&'*101,follow_redirects=False))=='session_expired'
 
 
-def test_all_pages_render_and_persian(client,setup):
+def test_all_pages_render_english_only(client,setup):
     _,_,_,service,_,actor,_=setup
     op=sale(service,actor)
     login(client,'admin')
-    routes=['/','/resellers','/resellers/new','/resellers/'+str(actor['id']),'/customers','/customers/'+str(op['customer_id']),'/customers/'+str(op['customer_id'])+'/edit','/customers/'+str(op['customer_id'])+'/links','/operations','/inbounds','/account']
-    for lang in ['en','fa']:
-        client.get('/language?lang='+lang)
-        for route in routes:
-            response=client.get(route)
-            assert response.status_code==200,(route,response.text)
-            assert ('dir="rtl"' if lang=='fa' else 'dir="ltr"') in response.text
-            assert 'fixture-server-secret' not in response.text
+    routes=['/','/resellers','/resellers/new','/resellers/'+str(actor['id']),'/resellers/'+str(actor['id'])+'?tab=plan','/customers','/customers?view=attention',
+            '/customers/'+str(op['customer_id']),'/customers/'+str(op['customer_id'])+'/edit','/customers/'+str(op['customer_id'])+'/links',
+            '/attention','/activity','/activity?technical=1','/inbounds','/account']
+    for route in routes:
+        response=client.get(route)
+        assert response.status_code==200,(route,response.text)
+        assert 'fixture-server-secret' not in response.text
+        assert 'dir="rtl"' not in response.text and 'فارسی' not in response.text
+    assert client.get('/operations',follow_redirects=False).headers['location']=='/attention'
+    assert client.get('/language?lang=fa').status_code==404
+
+
+def test_reseller_pages_render(client,setup):
+    _,_,_,service,_,actor,_=setup
+    op=sale(service,actor)
+    login(client)
+    for route in ['/','/customers','/customers/new','/customers/'+str(op['customer_id']),'/customers/'+str(op['customer_id'])+'/edit','/activity','/account']:
+        response=client.get(route)
+        assert response.status_code==200,(route,response.text)
 
 
 def test_create_workflow(client,setup):
@@ -117,16 +150,32 @@ def test_create_workflow(client,setup):
     assert panel.rows['web-client']['group']=='sales-team'
     detail=client.get(response.headers['location'])
     assert detail.status_code==200
-    assert 'Customer created successfully and is active' in detail.text
+    assert 'Customer created.' in detail.text
     assert db.one('SELECT package FROM customers')['package']==100*1024**3
 
 
-def test_over_quota_customer_create_shows_inline_message(client):
+def test_form_errors_show_inline_and_keep_values(client):
     token=login(client)
-    response=client.post('/customers/new',data={'csrf':token,'operation_id':str(uuid.uuid4()),'email':'over-quota','volume':'501','first_use':'on','days':'30','enable':'on','inbounds':'1'},follow_redirects=False)
-    assert response.status_code==200
-    assert 'This amount is greater than your remaining reseller quota' in response.text
-    assert '501' in response.text
+    response=client.post('/customers/new',data={'csrf':token,'operation_id':str(uuid.uuid4()),'email':'over-quota','volume':'501','first_use':'on','days':'30','enable':'on','inbounds':'1','comment':'keep me'})
+    assert response.status_code==400
+    assert 'Not enough data left in your plan' in response.text
+    assert 'value="501"' in response.text and 'value="over-quota"' in response.text and 'keep me' in response.text
+    assert 'class="field-error"' in response.text
+    response=client.post('/customers/new',data={'csrf':token,'operation_id':str(uuid.uuid4()),'email':'bad name!','volume':'5','first_use':'on','days':'30','inbounds':'1'})
+    assert response.status_code==400 and 'No spaces' in response.text
+    response=client.post('/customers/new',data={'csrf':token,'operation_id':str(uuid.uuid4()),'email':'no-inbound','volume':'5','first_use':'on','days':'30'})
+    assert response.status_code==400 and 'Pick at least one inbound' in response.text
+    response=client.post('/customers/new',data={'csrf':token,'operation_id':str(uuid.uuid4()),'email':'bad-date','volume':'5','expiry':'tomorrow','inbounds':'1'})
+    assert response.status_code==400 and 'Pick a date in the future' in response.text
+
+
+def test_reseller_form_errors_inline(client,setup):
+    _,_,_,_,_,actor,_=setup
+    token=login(client,'admin')
+    response=client.post('/resellers/new',data={'csrf':token,'username':'reseller','tag':'new-tag','password':'A-long-test-password!','volume':'10','expiry':'2099-01-01T00:00','inbounds':'1'})
+    assert response.status_code==400 and 'already used' in response.text and 'value="new-tag"' in response.text
+    response=client.post('/resellers/'+str(actor['id'])+'/renew',data={'csrf':token,'volume':'-1','expiry':'2099-01-01T00:00'})
+    assert response.status_code==400 and 'Enter a data limit above 0 GB' in response.text
 
 
 def test_password_change_revokes_other_sessions(client,setup):
@@ -134,6 +183,9 @@ def test_password_change_revokes_other_sessions(client,setup):
     token=login(client)
     other=TestClient(create_app(config,service.remote,background=False))
     login(other)
+    response=client.post('/account',data={'csrf':token,'current_password':'wrong-password','new_password':'A-different-test-password!'})
+    assert response.status_code==400 and 'The current password is wrong' in response.text
+    token=csrf(client,'/account')
     response=client.post('/account',data={'csrf':token,'current_password':'A-long-test-password!','new_password':'A-different-test-password!'},follow_redirects=False)
     assert response.status_code==303
     assert other.get('/',follow_redirects=False).status_code==303
@@ -147,14 +199,17 @@ def test_expired_can_read_not_write(client,setup):
     token=login(client)
     assert client.get('/').status_code==200
     assert client.get('/customers/'+str(op['customer_id'])+'/links').status_code==200
-    assert client.get('/customers/new').status_code==403
-    assert client.post('/customers/'+str(op['customer_id'])+'/delete',data={'csrf':token,'operation_id':str(uuid.uuid4())}).status_code==403
+    response=client.get('/customers/new')
+    assert response.status_code==403 and 'plan has expired' in response.text
+    response=client.post('/customers/'+str(op['customer_id'])+'/delete',data={'csrf':token,'operation_id':str(uuid.uuid4())},follow_redirects=False)
+    assert error_of(response)=='plan_expired'
 
 
 def test_login_rate_limit_and_no_enumeration(client):
     token=csrf(client)
     for _ in range(9):
-        assert client.post('/login',data={'csrf':token,'username':'reseller','password':'wrong'}).status_code==401
+        response=client.post('/login',data={'csrf':token,'username':'reseller','password':'wrong'})
+        assert response.status_code==401 and 'Wrong username or password' in response.text
     assert client.post('/login',data={'csrf':token,'username':'reseller','password':'A-long-test-password!'}).status_code==401
 
 
@@ -163,7 +218,7 @@ def test_connection_links_show_separate_subscription_and_uri_sections_without_qr
     op=sale(service,actor);login(client)
     response=client.get('/customers/'+str(op['customer_id'])+'/links')
     assert response.status_code==200
-    assert 'Subscription link' in response.text and 'Configuration URIs' in response.text
+    assert 'Subscription link' in response.text and 'Single configs' in response.text
     assert '<img' not in response.text.lower() and '/qr/' not in response.text.lower()
 
 
@@ -230,4 +285,78 @@ def test_subscription_link_hidden_when_unconfigured(setup):
 def test_unknown_message_is_not_rendered(client):
     login(client)
     assert 'Call support at' not in client.get('/?message=Call+support+at+evil').text
-    assert 'role="status">' in client.get('/account?message=saved').text
+    assert 'Call support at' not in client.get('/?error=Call+support+at+evil').text
+    assert 'Changes saved.' in client.get('/account?message=saved').text
+
+
+def test_errors_show_on_the_page_not_a_dialog(client,setup):
+    _,panel,db,service,_,actor,_=setup
+    op=sale(service,actor)
+    token=login(client)
+    panel.mode='unavailable'
+    response=client.post('/sync',data={'csrf':token},headers={'Referer':'http://testserver/customers'},follow_redirects=False)
+    assert response.headers['location'].startswith('/customers?error=remote_unavailable')
+    page=client.get(response.headers['location'])
+    assert page.status_code==200 and 'reach 3X-UI right now' in page.text and 'class="alert alert-danger"' in page.text
+
+
+def test_sync_now_for_resellers_is_rate_limited(client):
+    token=login(client)
+    assert client.post('/sync',data={'csrf':token},follow_redirects=False).headers['location'].endswith('message=synced')
+    assert error_of(client.post('/sync',data={'csrf':token},follow_redirects=False))=='sync_too_soon'
+
+
+def test_admin_accepts_3xui_values_from_the_customer_page(client,setup):
+    _,panel,db,service,_,actor,_=setup
+    op=sale(service,actor)
+    panel.rows['customer-one']['comment']='edited in panel'
+    service.refresh()
+    token=login(client,'admin')
+    page=client.get('/customers/'+str(op['customer_id']))
+    assert 'What changed in 3X-UI' in page.text and 'edited in panel' in page.text and 'Accept 3X-UI values' in page.text
+    attention=client.get('/attention')
+    assert 'edited in panel' in attention.text
+    response=client.post('/customers/'+str(op['customer_id'])+'/accept',data={'csrf':token},follow_redirects=False)
+    assert response.headers['location'].endswith('message=accepted')
+    assert db.one('SELECT issue FROM customers WHERE id=?',(op['customer_id'],))['issue']==''
+    assert 'All clear' in client.get('/attention').text
+
+
+def test_admin_deletes_reseller_with_customers(client,setup):
+    _,panel,db,service,_,actor,_=setup
+    sale(service,actor)
+    token=login(client,'admin')
+    page=client.get('/resellers/'+str(actor['id'])+'?tab=danger')
+    assert 'all of their 1 customers' in page.text
+    response=client.post('/resellers/'+str(actor['id'])+'/delete',data={'csrf':token},follow_redirects=False)
+    assert response.headers['location']=='/resellers?message=reseller_deleted'
+    assert panel.rows=={}
+    assert 'reseller' not in [r['username'] for r in db.all("SELECT username FROM users WHERE deleted=0")]
+    assert client.get('/resellers/'+str(actor['id'])).status_code==404
+
+
+def test_admin_removes_customer_that_needs_attention(client,setup):
+    _,panel,db,service,_,actor,_=setup
+    op=sale(service,actor)
+    panel.rows['customer-one']['id']=999
+    service.refresh()
+    assert db.one('SELECT issue FROM customers WHERE id=?',(op['customer_id'],))['issue']=='remote_identity'
+    token=login(client,'admin')
+    response=client.post('/customers/'+str(op['customer_id'])+'/delete',data={'csrf':token},headers={'Referer':'http://testserver/attention'},follow_redirects=False)
+    assert response.headers['location']=='/attention?message=customer_deleted'
+    assert db.one('SELECT status FROM customers WHERE id=?',(op['customer_id'],))['status']=='deleted'
+
+
+def test_activity_is_readable_and_scoped(client,setup):
+    _,panel,db,service,admin,actor,other=setup
+    op=sale(service,actor)
+    panel.delete_inbound(1)
+    service.refresh()
+    login(client)
+    text=client.get('/activity').text
+    assert 'created customer' in text and '<b>customer-one</b>' in text
+    assert 'was deleted in 3X-UI and removed here' in text
+    assert 'customer_create_reserved' not in text
+    other_client=TestClient(create_app(setup[0],service.remote,background=False))
+    login(other_client,'other','Another-test-password!')
+    assert 'customer-one' not in other_client.get('/activity').text

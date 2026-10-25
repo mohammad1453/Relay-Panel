@@ -172,3 +172,13 @@ def test_sync_lock_prevents_overlap(setup):
         service.sync_lock.release()
     service.refresh()
     assert setup[2].one("SELECT value FROM state WHERE key='sync_ok'")
+
+
+def test_deleted_customer_name_can_be_reused(setup):
+    _, panel, db, service, admin, actor, _ = setup
+    op = sale(service, actor, sub_id='custom-sub-id')
+    delete = service.reserve(actor, {}, str(uuid.uuid4()), 'delete', op['customer_id'])
+    service.execute(delete['id'])
+    again = sale(service, actor, sub_id='custom-sub-id')
+    assert customer(db, again['customer_id'])['status'] == 'active'
+    assert customer(db, op['customer_id'])['email'].startswith('customer-one~deleted-')
