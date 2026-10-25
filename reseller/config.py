@@ -19,7 +19,7 @@ class Config:
     timezone: str = "Asia/Tehran"
     session_seconds: int = 43200
     idle_seconds: int = 1800
-    sync_seconds: int = 120
+    sync_seconds: int = 30
     connect_timeout: float = 5
     timeout: float = 20
     xui_database_paths: str = ""
@@ -36,7 +36,7 @@ class Config:
                    timezone=os.getenv("APP_TIMEZONE", "Asia/Tehran"),
                    session_seconds=int(os.getenv("SESSION_SECONDS", "43200")),
                    idle_seconds=int(os.getenv("SESSION_IDLE_SECONDS", "1800")),
-                   sync_seconds=int(os.getenv("SYNC_SECONDS", "120")),
+                   sync_seconds=int(os.getenv("SYNC_SECONDS", "30")),
                    connect_timeout=float(os.getenv("XUI_CONNECT_TIMEOUT", "5")),
                    timeout=float(os.getenv("XUI_TIMEOUT", "20")),
                    xui_database_paths=os.getenv("XUI_DATABASE_PATHS", ""),

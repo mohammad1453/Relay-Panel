@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 import sqlite3
+import threading
 import uuid
 from decimal import Decimal, InvalidOperation
 from .db import now, audit
@@ -12,6 +13,10 @@ from .xui import RemoteError
 
 GIB = 1024**3
 PROTOCOLS = {'vmess', 'vless', 'trojan', 'shadowsocks', 'hysteria', 'wireguard', 'amneziawg', 'mtproto', 'tuic'}
+# Issues that mean the 3X-UI copy of a customer no longer matches Relay.
+DRIFT_ISSUES = ('remote_changed', 'remote_identity', 'remote_drift')
+# A sent create/update whose client is missing on this many full syncs is treated as gone.
+ABSENT_SYNCS = 3
 
 
 class RuleError(Exception):
@@ -61,6 +66,10 @@ def owned(db, actor, customer_id):
 class Service:
     def __init__(self, database, remote):
         self.db, self.remote = database, remote
+        # Only one full sync at a time (background worker and "Sync now").
+        self.sync_lock = threading.Lock()
+        # Node-backed changes the master accepted are trusted after this long.
+        self.settle_seconds = 60
 
     def bootstrap(self, username, password):
         with self.db.transaction() as db:
@@ -169,13 +178,43 @@ class Service:
 
     def sync_inbounds(self):
         rows = self.remote.inbounds()
+        remote_ids = {ib['id'] for ib in rows}
         with self.db.transaction() as db:
+            local = {r['id']: r['name'] for r in db.execute('SELECT id,name FROM inbounds')}
+            missing = sorted(i for i in local if i not in remote_ids)
+            if missing and not rows:
+                # An empty list may be a glitch: only trust it on two syncs in a row.
+                if not db.execute("SELECT 1 FROM state WHERE key='inbounds_empty_once'").fetchone():
+                    db.execute("INSERT INTO state VALUES('inbounds_empty_once',?)",(str(now()),))
+                    missing = []
+            else:
+                db.execute("DELETE FROM state WHERE key='inbounds_empty_once'")
+            for iid in missing:
+                self._remove_inbound(db, iid, local[iid])
             db.execute('UPDATE inbounds SET available=0')
             for ib in rows:
                 db.execute('INSERT INTO inbounds VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,protocol=excluded.protocol,port=excluded.port,available=excluded.available,metadata=excluded.metadata,synced=excluded.synced',
                            (ib['id'], str(ib.get('remark','')), ib['protocol'], ib.get('port',0), int(ib.get('enable',False)), dumps(ib), now()))
             db.execute("INSERT INTO state VALUES('connection',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(now()),))
         return rows
+
+    @staticmethod
+    def _remove_inbound(db, iid, name):
+        """Forget an inbound that was deleted in 3X-UI, and every link to it."""
+        customers = [r[0] for r in db.execute('SELECT customer_id FROM placements WHERE inbound_id=?',(iid,))]
+        resellers = [r[0] for r in db.execute('SELECT user_id FROM permissions WHERE inbound_id=?',(iid,))]
+        db.execute('DELETE FROM placements WHERE inbound_id=?',(iid,))
+        db.execute('DELETE FROM permissions WHERE inbound_id=?',(iid,))
+        db.execute('DELETE FROM inbounds WHERE id=?',(iid,))
+        for op in db.execute("SELECT id,desired FROM operations WHERE status IN ('reserved','sent','uncertain')").fetchall():
+            desired = json.loads(op['desired'])
+            before = dumps(desired)
+            for key in ('inboundIds','previousInboundIds'):
+                if key in desired:
+                    desired[key] = [i for i in desired[key] if i != iid]
+            if dumps(desired) != before:
+                db.execute('UPDATE operations SET desired=? WHERE id=?',(dumps(desired),op['id']))
+        audit(db, None, 'inbound_removed', dumps({'id':iid,'name':name,'customers':len(customers),'resellers':resellers}))
 
     def credentials(self, protocols, form):
         result = {}
@@ -233,8 +272,14 @@ class Service:
                 grant = active_grant(db, uid)  # Admin uses the same sales invariant.
                 if owner['suspended']:
                     raise RuleError('forbidden',403)
-            if customer and (customer['status'] != 'active' or customer['issue']):
+            if customer and kind == 'delete':
+                # Deleting must always be possible, also for customers that need attention.
+                if customer['status'] == 'deleted':
+                    raise RuleError('not_found',404)
+            elif customer and customer['status'] != 'active':
                 raise RuleError('reconcile_required',409)
+            elif customer and customer['issue']:
+                raise RuleError('remote_changed' if customer['issue'] in DRIFT_ISSUES else customer['issue'] if customer['issue'] in ('remote_missing','suspension_pending') else 'reconcile_required',409)
             if customer:
                 if db.execute("SELECT 1 FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(customer_id,)).fetchone():
                     raise RuleError('reconcile_required',409)
@@ -355,8 +400,16 @@ class Service:
             if op['kind'] == 'create':
                 if remote or any(r.get('subId') == local['sub_id'] or local['uuid'] and r.get('uuid') == local['uuid'] for r in records):
                     raise RuleError('identity_conflict')
-            elif not remote or not self._identity(local,remote) or not self._matches(remote,json.loads(local['payload'])) or set(remote['inboundIds']) != set(desired.get('previousInboundIds',desired['inboundIds'])):
-                raise RuleError('remote_drift')
+            elif op['kind'] == 'delete':
+                # A delete only needs to know it removes the right client; missing is fine.
+                if remote and (remote.get('subId') != local['sub_id'] or local['remote_id'] and remote.get('id') != local['remote_id']):
+                    raise RuleError('remote_identity')
+            elif not remote:
+                raise RuleError('remote_missing')
+            elif not self._identity(local,remote):
+                raise RuleError('remote_identity')
+            elif not self._matches(remote,json.loads(local['payload'])) or set(remote['inboundIds']) != set(desired.get('previousInboundIds',desired['inboundIds'])):
+                raise RuleError('remote_changed')
             for record in records:
                 if record['email']==local['email']:
                     continue
@@ -394,7 +447,7 @@ class Service:
             if op['kind'] == 'create':
                 result = self.remote.create(desired['client'],desired['inboundIds'])
             elif op['kind'] == 'delete':
-                result = self.remote.delete(local['email'])
+                result = self.remote.delete(local['email']) if remote else None
             else:
                 result = self.remote.update(local['email'],desired['client'])
             if isinstance(result,dict) and result.get('nodePending'):
@@ -421,9 +474,11 @@ class Service:
             self.uncertain(operation_id,exc.code)
         self.reconcile(operation_id)
 
-    def uncertain(self, oid, code):
+    def uncertain(self, oid, code, keep_ack=False):
         with self.db.transaction() as db:
-            db.execute("UPDATE operations SET status='uncertain',diagnostic=?,updated=? WHERE id=? AND status IN ('sent','uncertain')",(code,now(),oid))
+            # A read failure during verification must not erase proof that 3X-UI accepted the change.
+            keep = "CASE WHEN diagnostic IN ('remote_ack','node_pending') THEN diagnostic ELSE ? END" if keep_ack else '?'
+            db.execute("UPDATE operations SET status='uncertain',diagnostic="+keep+",updated=? WHERE id=? AND status IN ('sent','uncertain')",(code,now(),oid))
             audit(db,None,'remote_operation',oid,code)
 
     def release(self, oid, reason, unsent=False):
@@ -453,7 +508,12 @@ class Service:
         wanted, got = desired['expiryTime'], actual.get('expiryTime',0)
         return got == wanted or wanted < 0 and got > 0
 
-    def reconcile(self, oid):
+    def reconcile(self, oid, force=False):
+        """Read 3X-UI back and commit the operation once its result is verified.
+
+        force=True is the admin's "Mark as done": it skips per-inbound and node
+        checks but still requires the client to exist (or be gone for a delete).
+        """
         op = self.db.one('SELECT * FROM operations WHERE id=?',(oid,))
         if not op or op['status'] not in ('sent','uncertain'):
             return
@@ -463,8 +523,11 @@ class Service:
             records, inbounds = self.remote.clients(), self.remote.inbounds()
             remote = next((r for r in records if r['email']==local['email']),None)
             by_id = {i['id']:i for i in inbounds}
+            # Inbounds deleted in 3X-UI can no longer be verified or placed; ignore them.
+            wanted = [i for i in desired['inboundIds'] if i in by_id]
+            desired['inboundIds'] = wanted
             outcomes = {}
-            affected_ids=set(desired['inboundIds']) | set(desired.get('previousInboundIds',[]))
+            affected_ids={i for i in set(wanted) | set(desired.get('previousInboundIds',[])) if i in by_id}
             for iid in affected_ids:
                 ib = by_id.get(iid)
                 clients = (ib or {}).get('settings',{}).get('clients',[])
@@ -477,12 +540,16 @@ class Service:
                 else:
                     outcomes[iid]='verified' if not item else 'mismatch'
             if op['kind']=='delete':
-                complete = remote is None and all(v=='verified' for v in outcomes.values())
+                complete = remote is None and (force or all(v=='verified' for v in outcomes.values()))
+            elif force:
+                complete = bool(remote and remote.get('email')==local['email'])
             else:
                 complete = bool(remote and remote.get('email')==local['email'] and (not local['remote_id'] or remote.get('id')==local['remote_id']) and self._matches(remote,desired['client'])
                                 and set(remote['inboundIds'])==set(desired['inboundIds']) and all(v=='verified' for v in outcomes.values()))
             # Offline backing nodes cannot be proven applied just from master's stored configuration.
-            if any(by_id.get(i,{}).get('nodeId') for i in affected_ids) and op['diagnostic']!='remote_ack':
+            # A change the master accepted with "node pending" is trusted once it has settled.
+            settled = op['diagnostic']=='node_pending' and op['created'] < now()-self.settle_seconds
+            if not force and any(by_id.get(i,{}).get('nodeId') for i in affected_ids) and op['diagnostic']!='remote_ack' and not settled:
                 complete = False
             with self.db.transaction() as db:
                 current = db.execute('SELECT status FROM operations WHERE id=?',(oid,)).fetchone()[0]
@@ -491,7 +558,7 @@ class Service:
                 for iid,status in outcomes.items():
                     db.execute('UPDATE placements SET status=? WHERE customer_id=? AND inbound_id=?',(status,local['id'],iid))
                 if not complete:
-                    db.execute("UPDATE operations SET status='uncertain',diagnostic=CASE WHEN diagnostic='node_pending' THEN diagnostic ELSE 'reconcile_required' END,updated=? WHERE id=?",(now(),oid))
+                    db.execute("UPDATE operations SET status='uncertain',diagnostic=CASE WHEN diagnostic IN ('node_pending','remote_ack') THEN diagnostic ELSE 'reconcile_required' END,updated=? WHERE id=?",(now(),oid))
                     return
                 refund = int(desired.get('refund',0)) if op['kind']=='update' else 0
                 changed = db.execute('UPDATE grants SET reserved=reserved-?,sold=sold+?-? WHERE id=? AND sold>=?',
@@ -521,13 +588,69 @@ class Service:
                         payload['allowedIPs'] = json.loads(remote['allowedIPs']) if isinstance(remote['allowedIPs'],str) else remote['allowedIPs']
                     payload['expiryTime'] = remote['expiryTime']
                 db.execute('UPDATE customers SET status=?,payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue=? WHERE id=?',
-                           ('deleted' if op['kind']=='delete' else 'active',dumps(payload),payload['totalGB'],remote['id'] if remote else local['remote_id'],payload.get('id'),payload['subId'],'',local['id']))
+                           ('deleted' if op['kind']=='delete' else 'active',dumps(payload),payload['totalGB'] or local['package'],remote['id'] if remote else local['remote_id'],payload.get('id'),payload['subId'],'',local['id']))
+                db.execute("DELETE FROM state WHERE key IN (?,?)",(f"drift:{local['id']}",f"absent:{oid}"))
                 db.execute("UPDATE operations SET status='committed',diagnostic='',updated=? WHERE id=?",(now(),oid))
                 audit(db,op['actor'],'customer_'+op['kind'],local['id'])
         except RemoteError as exc:
-            self.uncertain(oid,exc.code)
+            self.uncertain(oid,exc.code,keep_ack=True)
 
-    def refresh(self):
+    def refresh(self, wait=None):
+        """Full sync with 3X-UI. Only one runs at a time."""
+        if not self.sync_lock.acquire(timeout=-1 if wait is None else wait):
+            raise RuleError('sync_busy',409)
+        try:
+            self._refresh()
+        except RemoteError as exc:
+            self._set_state('sync_error',f'{exc.code}:{now()}')
+            raise
+        else:
+            self._set_state('sync_ok',str(now()))
+            with self.db.transaction() as db:
+                db.execute("DELETE FROM state WHERE key='sync_error'")
+        finally:
+            self.sync_lock.release()
+
+    def reconcile_pending(self):
+        """Quick check of customers still being set up; skipped while a full sync runs."""
+        if not self.sync_lock.acquire(blocking=False):
+            return
+        try:
+            for op in self.db.all("SELECT id FROM operations WHERE status IN ('sent','uncertain')"):
+                self.reconcile(op['id'])
+        finally:
+            self.sync_lock.release()
+
+    def _set_state(self, key, value):
+        with self.db.transaction() as db:
+            db.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
+
+    def _bump_absent(self, oid):
+        """Count full syncs (at least 20s apart) on which an operation's client was missing."""
+        key=f'absent:{oid}'
+        with self.db.transaction() as db:
+            row=db.execute('SELECT value FROM state WHERE key=?',(key,)).fetchone()
+            count,stamp=(int(x) for x in row[0].split(':')) if row else (0,0)
+            if now()-stamp>=20:
+                count+=1
+                db.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,f'{count}:{now()}'))
+            return count
+
+    def abandon(self, oid, reason):
+        """Finish a sent operation whose client is gone from 3X-UI: return the held quota."""
+        with self.db.transaction() as db:
+            op = db.execute('SELECT * FROM operations WHERE id=?',(oid,)).fetchone()
+            if not op or op['status'] not in ('sent','uncertain'):
+                return
+            c = db.execute('SELECT * FROM customers WHERE id=?',(op['customer_id'],)).fetchone()
+            db.execute('UPDATE grants SET reserved=reserved-? WHERE id=?',(op['charge'],op['grant_id']))
+            self._entry(db,c['user_id'],op['grant_id'],c['id'],oid,'release',op['charge'],op['actor'])
+            db.execute("UPDATE operations SET status='failed',diagnostic=?,updated=? WHERE id=?",(reason,now(),oid))
+            db.execute("UPDATE customers SET status='deleted',issue='remote_missing',online=NULL WHERE id=?",(c['id'],))
+            db.execute("DELETE FROM state WHERE key IN (?,?,?)",(f'absent:{oid}',f"drift:{c['id']}",f"customer_enable:{c['id']}"))
+            audit(db,None,'customer_removed_during_setup',c['id'],reason)
+
+    def _refresh(self):
         self.sync_inbounds()
         remote_records = self.remote.clients()
         remote_by_email = {r['email']: r for r in remote_records}
@@ -537,7 +660,7 @@ class Service:
                 if remote and remote.get('enable') is not False:
                     db.execute("INSERT INTO state(key,value) VALUES(?, '0') ON CONFLICT(key) DO NOTHING", (f"customer_enable:{customer['id']}",))
         self.sync_customer_enable(remote_records)
-        records = {r['email']:r for r in remote_records}
+        records = remote_by_email
         try:
             online = set(self.remote.online())
         except RemoteError:
@@ -546,34 +669,51 @@ class Service:
             for local in db.execute("SELECT c.*,u.suspended owner_suspended FROM customers c JOIN users u ON u.id=c.user_id WHERE c.status='active'").fetchall():
                 remote = records.get(local['email'])
                 ids = {r[0] for r in db.execute('SELECT inbound_id FROM placements WHERE customer_id=?',(local['id'],))}
+                pending = db.execute("SELECT 1 FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(local['id'],)).fetchone()
                 issue = ''
                 if not remote:
                     issue='remote_missing'
-                else:
+                elif not pending:
+                    # While an edit is in flight the remote copy is expected to differ.
                     expected = json.loads(local['payload'])
                     if local['owner_suspended']:
                         expected['enable'] = False
-                    if not self._identity(local,remote) or set(remote['inboundIds'])!=ids or not self._matches(remote,expected):
-                        issue='remote_drift'
+                    if not self._identity(local,remote):
+                        issue='remote_identity'
+                    elif set(remote['inboundIds'])!=ids or not self._matches(remote,expected):
+                        issue='remote_changed'
                     if db.execute('SELECT 1 FROM state WHERE key=?',(f"customer_enable:{local['id']}",)).fetchone():
                         issue='suspension_pending'
-                traffic = remote.get('traffic') if remote and not issue else None
+                if issue in DRIFT_ISSUES:
+                    # Snapshot of the 3X-UI copy so the admin can see exactly what changed.
+                    db.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(f"drift:{local['id']}",dumps(remote)))
+                else:
+                    db.execute('DELETE FROM state WHERE key=?',(f"drift:{local['id']}",))
+                traffic = remote.get('traffic') if remote else None
                 used = int(traffic.get('up',0))+int(traffic.get('down',0)) if isinstance(traffic,dict) else None
-                pending = db.execute("SELECT 1 FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(local['id'],)).fetchone()
                 if not remote and not pending:
                     db.execute("UPDATE customers SET status='deleted',issue='remote_missing',online=NULL,telemetry_at=?,remote_expiry=NULL WHERE id=?",(now(),local['id']))
+                    db.execute('DELETE FROM state WHERE key=?',(f"customer_enable:{local['id']}",))
                     audit(db,None,'customer_remote_missing',local['id'],'remote_missing')
                 else:
-                    db.execute('UPDATE customers SET issue=?,used=?,online=?,telemetry_at=?,remote_expiry=? WHERE id=?',
-                               (issue,used,int(local['email'] in online) if online is not None and not issue else None,now(),remote.get('expiryTime') if remote else None,local['id']))
-        for op in self.db.all("SELECT id,status FROM operations WHERE status IN ('reserved','sent','uncertain')"):
+                    db.execute('UPDATE customers SET issue=?,used=coalesce(?,used),online=?,telemetry_at=?,remote_expiry=? WHERE id=?',
+                               (issue,used,int(local['email'] in online) if online is not None and remote else None,now(),remote.get('expiryTime') if remote else None,local['id']))
+        for op in self.db.all("SELECT o.id,o.status,o.kind,o.created,c.email FROM operations o JOIN customers c ON c.id=o.customer_id WHERE o.status IN ('reserved','sent','uncertain')"):
             if op['status']=='reserved':
                 # Crash before send: release, rather than running an old action after plan expiry.
-                row=self.db.one('SELECT created FROM operations WHERE id=?',(op['id'],))
-                if row['created']<now()-300:
+                if op['created']<now()-300:
                     self.release(op['id'],'unsent_expired',unsent=True)
+                continue
+            if op['kind'] in ('create','update') and op['email'] not in remote_by_email:
+                # Removed in 3X-UI while still being set up (or never applied): after a few
+                # syncs, stop waiting, return the held quota and remove it from Relay.
+                if self._bump_absent(op['id']) >= ABSENT_SYNCS:
+                    self.abandon(op['id'],'remote_missing')
+                    continue
             else:
-                self.reconcile(op['id'])
+                with self.db.transaction() as db:
+                    db.execute('DELETE FROM state WHERE key=?',(f"absent:{op['id']}",))
+            self.reconcile(op['id'])
 
     def repair(self, actor, oid):
         """Explicit admin retry of a verified existing identity; never re-creates an absent client."""
@@ -674,3 +814,105 @@ class Service:
             db.execute("UPDATE customers SET status='pending',issue='' WHERE id=?",(local['id'],))
             audit(db,actor['id'],'retry_unsent',local['id'])
             return dict(db.execute('SELECT * FROM operations WHERE id=?',(new_id,)).fetchone())
+
+    # ----- Admin tools for customers that need attention -------------------
+
+    # Fields copied from 3X-UI when the admin accepts its values.
+    ACCEPT_FIELDS = ('totalGB','expiryTime','enable','comment','subId','group','password','auth','flow','security',
+                     'secret','privateKey','publicKey','preSharedKey','keepAlive','adTag','forwardedPorts')
+
+    def accept_remote(self, actor, customer_id):
+        """Make Relay match a customer that was edited directly in 3X-UI."""
+        if actor['role'] != 'admin':
+            raise RuleError('forbidden',403)
+        records = self.remote.clients()
+        with self.db.transaction() as db:
+            local = db.execute('SELECT * FROM customers WHERE id=?',(customer_id,)).fetchone()
+            if not local or local['status'] != 'active':
+                raise RuleError('not_found',404)
+            if db.execute("SELECT 1 FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(customer_id,)).fetchone():
+                raise RuleError('reconcile_required',409)
+            remote = next((r for r in records if r['email'] == local['email']),None)
+            if not remote:
+                raise RuleError('remote_missing',409)
+            payload = json.loads(local['payload'])
+            for field in self.ACCEPT_FIELDS:
+                if field in remote:
+                    payload[field] = remote[field]
+            if remote.get('uuid'):
+                payload['id'] = remote['uuid']
+            if remote.get('allowedIPs'):
+                payload['allowedIPs'] = json.loads(remote['allowedIPs']) if isinstance(remote['allowedIPs'],str) else remote['allowedIPs']
+            known = {r[0] for r in db.execute('SELECT id FROM inbounds')}
+            ids = sorted({i for i in remote['inboundIds'] if i in known})
+            for field in ('id','subId','password','auth'):
+                value = payload.get(field)
+                if not value:
+                    continue
+                fingerprint = hashlib.sha256(str(value).encode()).hexdigest()
+                claim = db.execute('SELECT customer_id FROM identities WHERE kind=? AND value=?',(field,fingerprint)).fetchone()
+                if claim and claim[0] != customer_id:
+                    raise RuleError('identity_conflict')
+                db.execute('INSERT OR IGNORE INTO identities VALUES(?,?,?)',(field,fingerprint,customer_id))
+            # Unlimited (0) cannot be stored as a package; keep the sold size then.
+            package = payload.get('totalGB') if isinstance(payload.get('totalGB'),int) and payload['totalGB'] > 0 else local['package']
+            db.execute('DELETE FROM placements WHERE customer_id=?',(customer_id,))
+            db.executemany("INSERT INTO placements(customer_id,inbound_id,status) VALUES(?,?,'verified')",[(customer_id,i) for i in ids])
+            db.execute("UPDATE customers SET payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue='',remote_expiry=? WHERE id=?",
+                       (dumps(payload),package,remote['id'],payload.get('id'),payload['subId'],remote.get('expiryTime'),customer_id))
+            db.execute('DELETE FROM state WHERE key=?',(f'drift:{customer_id}',))
+            grant = db.execute('SELECT id FROM grants WHERE user_id=? ORDER BY id DESC LIMIT 1',(local['user_id'],)).fetchone()
+            if grant:
+                # Zero-amount note: a change made in 3X-UI is not charged to the reseller.
+                db.execute("INSERT INTO ledger(user_id,grant_id,customer_id,kind,amount,actor,created) VALUES(?,?,?,'adjust',0,?,?)",
+                           (local['user_id'],grant['id'],customer_id,actor['id'],now()))
+            audit(db,actor['id'],'customer_accept_remote',dumps({'customer':customer_id,'old':local['package'],'new':package}))
+
+    def force_remove(self, actor, customer_id):
+        """Admin delete that works in every state: removes the client from 3X-UI if it
+        is still there, cancels anything in progress and returns held quota."""
+        if actor['role'] != 'admin':
+            raise RuleError('forbidden',403)
+        local = self.db.one('SELECT * FROM customers WHERE id=?',(customer_id,))
+        if not local or local['status'] == 'deleted':
+            raise RuleError('not_found',404)
+        records = self.remote.clients()
+        remote = next((r for r in records if r['email'] == local['email']),None)
+        if remote:
+            self.remote.delete(local['email'])
+            if any(r['email'] == local['email'] for r in self.remote.clients()):
+                raise RuleError('remote_rejected',502)
+        with self.db.transaction() as db:
+            for op in db.execute("SELECT * FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(customer_id,)).fetchall():
+                db.execute('UPDATE grants SET reserved=reserved-? WHERE id=?',(op['charge'],op['grant_id']))
+                self._entry(db,local['user_id'],op['grant_id'],customer_id,op['id'],'release',op['charge'],actor['id'])
+                db.execute("UPDATE operations SET status='failed',diagnostic='cancelled',updated=? WHERE id=?",(now(),op['id']))
+            db.execute("UPDATE customers SET status='deleted',issue='',online=NULL WHERE id=?",(customer_id,))
+            db.execute('DELETE FROM state WHERE key IN (?,?)',(f'drift:{customer_id}',f'customer_enable:{customer_id}'))
+            audit(db,actor['id'],'customer_force_removed',customer_id,'ok' if remote else 'already_missing')
+
+    def delete_reseller(self, actor, uid):
+        """Delete a reseller and all of its customers. Returns how many customers failed."""
+        if actor['role'] != 'admin':
+            raise RuleError('forbidden',403)
+        user = self.db.one("SELECT * FROM users WHERE id=? AND role='reseller' AND deleted=0",(uid,))
+        if not user:
+            raise RuleError('not_found',404)
+        failed = 0
+        for customer in self.db.all("SELECT id FROM customers WHERE user_id=? AND status!='deleted'",(uid,)):
+            try:
+                self.force_remove(actor,customer['id'])
+            except (RemoteError,RuleError):
+                failed += 1
+        if failed:
+            return failed
+        with self.db.transaction() as db:
+            # Ledger and audit rows are permanent, so the account is retired, not erased.
+            # Renaming frees the username and tag for reuse.
+            db.execute("UPDATE users SET deleted=1,suspended=1,username=?,tag=? WHERE id=?",
+                       (f"deleted-{uid}-{user['username']}",f"deleted-{uid}-{user['tag']}",uid))
+            db.execute('DELETE FROM permissions WHERE user_id=?',(uid,))
+            db.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
+            db.execute('UPDATE grants SET closed=1 WHERE user_id=?',(uid,))
+            audit(db,actor['id'],'reseller_delete',user['username'])
+        return 0

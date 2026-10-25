@@ -213,7 +213,7 @@ def install(args):
             fail('Master authentication is required')
         values={'APP_ENV':'public-http' if public_http else 'development' if tunnel_http else 'production','APP_ORIGIN':origin,'APP_BASE_PATH':base_path,'APP_DB':str(DATA/'app.db'),
                 'APP_PORT':str(args.port),'APP_TIMEZONE':'Asia/Tehran','XUI_DATABASE_PATHS':original,
-                'XUI_URL':url,'XUI_SUB_URL':sub_url,'XUI_TOKEN':token,'XUI_USERNAME':username,'XUI_PASSWORD':password,'SYNC_SECONDS':'120'}
+                'XUI_URL':url,'XUI_SUB_URL':sub_url,'XUI_TOKEN':token,'XUI_USERNAME':username,'XUI_PASSWORD':password,'SYNC_SECONDS':'30'}
     # Ubuntu's apt hook may otherwise restart unrelated services automatically.
     package_env={**os.environ,'NEEDRESTART_MODE':'l','NEEDRESTART_SUSPEND':'1'}
     run(['apt-get','update'],env=package_env)
@@ -292,7 +292,7 @@ def extract_backup(archive,destination):
         if hashlib.sha256((destination/name).read_bytes()).hexdigest()!=manifest['files'].get(name):
             fail('Backup checksum mismatch')
     with contextlib.closing(sqlite3.connect('file:'+str(destination/'app.db')+'?mode=ro',uri=True)) as conn:
-        if conn.execute('PRAGMA application_id').fetchone()[0]!=APP_ID or conn.execute('PRAGMA user_version').fetchone()[0] not in (1,2) or conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
+        if conn.execute('PRAGMA application_id').fetchone()[0]!=APP_ID or conn.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3) or conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
             fail('Backup database validation failed')
 
 
