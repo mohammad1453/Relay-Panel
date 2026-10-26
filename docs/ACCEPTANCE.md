@@ -15,7 +15,7 @@ Local development date: 2026-10-13. No actual VPS or deployed master panel was a
 | Retry before send | Proven-unsent creation can be retried with a fresh reservation and idempotency key. No blind retry after transmission. |
 | Expiration | Reseller read-only state, preserved customers, independent customer expiry, source-verified negative first-use duration and activation preservation. |
 | Telemetry | Global aggregate used once; stale/unavailable state; no invented speed. |
-| Bilingual UI | Persian RTL / English LTR; templates and backend errors translated, localized digits and timezone; browser desktop/mobile inspection. Gregorian calendar. |
+| Interface | English only. Errors are shown on the same page (alert box plus a message under the field) and forms keep what was typed. Activity and data movements are written as plain sentences. Desktop and mobile layouts, light and dark themes. |
 | Deployment | Real installer, dedicated user/service/paths, loopback binding, private config, preflight-only mode, ownership/path checks and idempotent completed installation. |
 | Lifecycle | Consistent online backup, archive validation, restore lock/session invalidation, verified local update archive, automatic rollback, nonpurging uninstall and deliberate purge. |
 | Original-panel safety | No original service mutations/database writes; temporary sentinel and command-target tests. Actual VPS unchanged because it was never accessed. |

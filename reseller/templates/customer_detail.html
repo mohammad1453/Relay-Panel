@@ -1,1 +1,99 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><div><span class="eyebrow">{{ t('customers') }} / #{{ customer.id }}</span><h1>{{ customer.email }}</h1><span class="badge">{{ t(customer.status) }}</span></div><div class="inline"><a class="button" href="/customers">{{ t('back') }}</a><a class="button" href="/customers/{{ customer.id }}/links">{{ t('links') }}</a>{% if writable %}<a class="button primary" href="/customers/{{ customer.id }}/edit">{{ t('edit') }}</a>{% endif %}</div></div>{% if not writable %}<p class="notice warning">{{ t('readonly') }}</p>{% endif %}{% if customer.telemetry_at and now-customer.telemetry_at>stale_after %}<p class="notice warning">{{ t('stale') }}</p>{% endif %}{% if customer.issue %}<p class="notice warning">{{ t(customer.issue) }}</p>{% endif %}<div class="cards"><section class="card"><span>{{ t('package') }}</span><strong>{{ gb(customer.package) }} <small>GB</small></strong></section><section class="card"><span>{{ t('usage') }}</span><strong>{{ gb(customer.used) }} <small>GB</small></strong><small>{{ date(customer.telemetry_at) }}</small></section><section class="card"><span>{{ t('expiry') }}</span><h2>{{ date((customer.remote_expiry or p.expiryTime)/1000) if (customer.remote_expiry or p.expiryTime)>0 else t('first_use') }}</h2></section></div><section class="panel"><h2>{{ t('basics') }}</h2><p>{{ p.comment }}</p><p>{{ t('tag') }}: <b>{{ p.group }}</b></p><p>{{ t('enabled') }}: {{ t('yes' if p.enable else 'no') }}</p><div class="inline">{% for i in placements %}<span class="badge">{{ i.name or t('unnamed_inbound') }} · {{ t(i.status) }}</span>{% endfor %}</div></section><section class="panel"><h2>{{ t('operations') }}</h2>{% include '_operations.html' %}</section>{% if writable %}<section class="panel danger-zone"><p>{{ t('deleted_hint') }}</p><form method="post" action="/customers/{{ customer.id }}/delete" data-confirm="{{ t('confirm_delete') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="operation_id" value="{{ operation_id }}"><button class="danger">{{ t('delete') }}</button></form></section>{% endif %}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ display_name(customer.email) }}{% endblock %}
+{% block heading %}<a href="/customers" class="crumb">{{ t('customers') }}</a> / {{ display_name(customer.email) }}{% endblock %}
+{% block body %}
+{%- set ms = customer.remote_expiry or p.expiryTime -%}
+<div class="page-head">
+  <div>
+    <h1 class="title-with-tag">{{ display_name(customer.email) }} {{ ui.tag(state, tone) }}</h1>
+    <p class="muted">{% if p.comment %}{{ p.comment }} · {% endif %}{% if user.role=='admin' and owner %}{{ t('owner') }}: <a href="/resellers/{{ customer.user_id }}">{{ owner.username }}</a> · {% endif %}{{ t('created') }} {{ date(customer.created) }}</p>
+  </div>
+  <div class="actions-row">
+    {% if customer.status=='active' %}
+    <a class="btn btn-ghost" href="/customers/{{ customer.id }}/links">{{ ui.icon('link') }}<span>{{ t('links') }}</span></a>
+    {% if writable and not customer.issue and not pending %}<a class="btn btn-primary" href="/customers/{{ customer.id }}/edit">{{ ui.icon('edit') }}<span>{{ t('edit') }}</span></a>{% endif %}
+    {% endif %}
+  </div>
+</div>
+
+{# What needs attention, in plain words, with the right buttons #}
+{% if pending %}
+<div class="callout callout-warning">
+  {{ ui.icon('clock','callout-icon') }}
+  <div class="callout-body">
+    <b>{{ t('setting_up') }} · {{ t('op_'+pending.kind) }}</b>
+    <p>{{ t('issue_node_pending' if pending.diagnostic=='node_pending' else 'issue_setting_up') }}</p>
+    {% if user.role=='admin' %}<div class="actions-row">
+      <form method="post" action="/operations/{{ pending.id }}/reconcile">{{ ui.csrf_field() }}<button class="btn btn-ghost btn-sm" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('check_again') }}</span></button></form>
+      <form method="post" action="/operations/{{ pending.id }}/done">{{ ui.csrf_field() }}{{ ui.confirm_button(t('mark_done'), None, 'ghost btn-sm', 'check') }}</form>
+    </div>{% endif %}
+  </div>
+</div>
+{% elif customer.status=='failed' %}
+<div class="callout callout-danger">
+  {{ ui.icon('alert','callout-icon') }}
+  <div class="callout-body"><b>{{ t('failed') }}</b><p>{{ t('issue_failed_create') }}{% if failed_create and failed_create.diagnostic %} {{ t(failed_create.diagnostic) }}{% endif %}</p>
+  {% if failed_create and writable %}<div class="actions-row"><form method="post" action="/operations/{{ failed_create.id }}/retry">{{ ui.csrf_field() }}<input type="hidden" name="operation_id" value="{{ operation_id }}"><button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('retry_unsent') }}</span></button></form></div>{% endif %}
+  </div>
+</div>
+{% elif customer.issue %}
+<div class="callout callout-{{ 'warning' if customer.issue=='suspension_pending' else 'danger' }}">
+  {{ ui.icon('alert','callout-icon') }}
+  <div class="callout-body">
+    <b>{{ t('needs_attention') }}</b>
+    <p>{{ t('issue_'+customer.issue) if user.role=='admin' else t('reseller_view_issue') if customer.issue!='suspension_pending' else t('issue_suspension_pending') }}</p>
+    {% if diff and user.role=='admin' %}
+    <h3 class="sub">{{ t('what_changed') }}</h3>
+    <div class="table-wrap"><table class="table table-compact diff">
+      <thead><tr><th>{{ t('field') }}</th><th>{{ t('relay_value') }}</th><th>{{ t('xui_value') }}</th></tr></thead>
+      <tbody>{% for field, relay, remote_value in diff %}<tr><td>{{ field }}</td><td><span class="old">{{ relay }}</span></td><td><span class="new">{{ remote_value }}</span></td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% if user.role=='admin' and customer.issue in ('remote_changed','remote_identity','remote_drift') %}
+    <div class="actions-row">
+      <form method="post" action="/customers/{{ customer.id }}/accept">{{ ui.csrf_field() }}<button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('accept_remote') }}</span></button></form>
+      <small class="muted">{{ t('accept_remote_hint') }}</small>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="stats">
+  <div class="stat"><span class="stat-icon tone-primary">{{ ui.icon('data') }}</span><div class="grow"><small>{{ t('usage') }}</small><b>{{ gb(customer.used) if customer.used is not none else '0' }} <span class="unit">/ {{ gb(customer.package) }} GB</span></b>{{ ui.progress(customer.used or 0, customer.package) }}</div></div>
+  <div class="stat"><span class="stat-icon tone-info">{{ ui.icon('plan') }}</span><div><small>{{ t('remaining') }}</small><b>{{ gb([0, customer.package-(customer.used or 0)]|max) }} <span class="unit">GB</span></b></div></div>
+  <div class="stat"><span class="stat-icon tone-warning">{{ ui.icon('calendar') }}</span><div><small>{{ t('expiry') }}</small><b class="b-sm">{{ expiry_text(ms) }}</b>{% if ms and ms>0 %}<small class="muted">{{ date(ms/1000) }}</small>{% endif %}</div></div>
+  <div class="stat"><span class="stat-icon tone-{{ 'success' if customer.online and customer.telemetry_at and now-customer.telemetry_at<=stale_after else 'muted' }}">{{ ui.icon('wifi') }}</span><div><small>{{ t('online_status') }}</small>
+    <b class="b-sm">{% if customer.status!='active' %}—{% elif not customer.telemetry_at or now-customer.telemetry_at>stale_after %}{{ t('unknown') }}{% elif customer.online %}{{ t('online') }}{% else %}{{ t('offline') }}{% endif %}</b>
+    <small class="muted">{{ t('last_update') }} {{ rel(customer.telemetry_at) }}</small></div></div>
+</div>
+
+<div class="grid-main">
+  <section class="card">
+    <header class="card-head"><h2>{{ t('details') }}</h2></header>
+    <dl class="kv">
+      <div><dt>{{ t('enabled') }}</dt><dd>{{ ui.tag('yes','success') if p.enable else ui.tag('no','muted') }}</dd></div>
+      <div><dt>{{ t('inbounds') }}</dt><dd><div class="tags">{% for i in placements %}<span class="tag {{ 'tag-outline' if i.name else 'tag-warning' }}" title="{{ i.protocol or '' }} {{ i.port or '' }}">{{ i.name or t('unnamed_inbound') }}{% if i.protocol %} · {{ i.protocol }}{% endif %}</span>{% else %}<span class="muted">{{ t('no_inbounds_left') }}</span>{% endfor %}</div></dd></div>
+      {% if user.role=='admin' %}<div><dt>Group</dt><dd>{{ p.group or '—' }}</dd></div>{% endif %}
+      <div><dt>{{ t('sub_id') }}</dt><dd><code>{{ display_name(customer.sub_id) }}</code></dd></div>
+    </dl>
+    {% if customer.status!='deleted' and (user.role=='admin' or writable) %}
+    <div class="danger-row">
+      <div><b>{{ t('delete_customer') }}</b><p class="muted">{{ t('delete_customer_hint') if user.role!='admin' else 'Removes this customer from 3X-UI, also if it is stuck or was changed there. Data already sold is not returned to the plan.' }}</p></div>
+      <form method="post" action="/customers/{{ customer.id }}/delete">{{ ui.csrf_field() }}<input type="hidden" name="operation_id" value="{{ operation_id }}">{{ ui.confirm_button(t('delete')) }}</form>
+    </div>
+    {% endif %}
+  </section>
+  <section class="card">
+    <header class="card-head"><h2>{{ t('customer_history') }}</h2></header>
+    {% if ops %}
+    <ul class="moves">{% for o in ops %}
+      <li><span class="tag tag-{{ 'success' if o.status=='committed' else 'danger' if o.status=='failed' else 'warning' }}">{{ t('op_'+o.kind) }}</span>
+      <span class="moves-what">{{ t(o.status) }}{% if o.status=='failed' and o.diagnostic %} — <small class="muted">{{ t(o.diagnostic) }}</small>{% endif %}<small class="muted"> · {{ o.actor_name or t('system') }}</small></span>
+      {% if o.charge %}<b class="moves-amount">{{ gb(o.charge) }} GB</b>{% else %}<span></span>{% endif %}
+      <time class="muted" title="{{ date(o.created) }}">{{ rel(o.created) }}</time></li>
+    {% endfor %}</ul>
+    {% else %}<div class="empty small">{{ ui.icon('activity') }}<p>{{ t('empty') }}</p></div>{% endif %}
+  </section>
+</div>
+{% endblock %}

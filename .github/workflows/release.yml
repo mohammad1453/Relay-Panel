@@ -1,0 +1,53 @@
+name: Release
+
+# Push a tag like v1.0.0 (matching the VERSION file) to publish a release.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag must match VERSION
+        run: |
+          test "${GITHUB_REF_NAME}" = "v$(cat VERSION)" || { echo "Tag ${GITHUB_REF_NAME} does not match VERSION $(cat VERSION)"; exit 1; }
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt -c requirements.lock
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Build release archive
+        run: python tools/package_release.py
+      - name: Release notes from CHANGELOG
+        run: |
+          version="$(cat VERSION)"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" {on=1; next}
+            on && /^## \[/ {exit}
+            on {print}
+          ' CHANGELOG.md > notes.md
+          cat >> notes.md <<NOTES
+
+          ## Install or update
+
+          \`\`\`bash
+          bash <(curl -Ls https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install-online.sh) --version ${GITHUB_REF_NAME}
+          \`\`\`
+
+          SHA-256 of \`relay-panel-${GITHUB_REF_NAME}.tar.gz\`: \`$(cut -d' ' -f1 dist/relay-panel-${GITHUB_REF_NAME}.tar.gz.sha256)\`
+          NOTES
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/relay-panel-${GITHUB_REF_NAME}.tar.gz" \
+            "dist/relay-panel-${GITHUB_REF_NAME}.tar.gz.sha256" \
+            --title "Relay ${GITHUB_REF_NAME}" --notes-file notes.md --verify-tag

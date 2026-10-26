@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('attention') }}{% endblock %}
+{% block heading %}{{ t('attention') }}{% endblock %}
+{% block body %}
+<div class="page-head"><div><h1>{{ t('attention') }}</h1><p class="muted">{{ t('attention_hint') }}</p></div>
+<form method="post" action="/sync">{{ ui.csrf_field() }}<button class="btn btn-ghost" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('sync_now') }}</span></button></form></div>
+{% if not items %}
+<section class="card">{{ ui.empty('check', t('all_clear')) }}</section>
+{% endif %}
+{% for item in items %}
+<section class="card attention-card tone-border-{{ item.tone }}">
+  <header class="attention-head">
+    <div class="cell-main"><span class="feed-icon tone-{{ item.tone }}">{{ ui.icon('clock' if item.kind=='operation' else 'alert') }}</span>
+      <div><a class="strong-link" href="/customers/{{ item.customer_id }}">{{ display_name(item.email) }}</a>
+      <small class="muted">{{ t('owner') }}: {{ item.owner }} · {{ t('started') }} {{ rel(item.since) }}</small></div></div>
+    {% if item.kind=='operation' %}{{ ui.tag('setting_up','warning') }} <span class="tag tag-outline">{{ t('op_'+item.op.kind) }}</span>
+    {% elif item.kind=='failed' %}{{ ui.tag('failed','danger') }}
+    {% else %}{{ ui.tag('needs_attention', item.tone) }}{% endif %}
+  </header>
+  <p>{{ t(item.text) }}{% if item.reason %} <span class="muted">{{ t(item.reason) }}</span>{% endif %}</p>
+  {% if item.diff %}
+  <h3 class="sub">{{ t('what_changed') }}</h3>
+  <div class="table-wrap"><table class="table table-compact diff"><thead><tr><th>{{ t('field') }}</th><th>{{ t('relay_value') }}</th><th>{{ t('xui_value') }}</th></tr></thead>
+  <tbody>{% for field, relay, remote_value in item.diff %}<tr><td>{{ field }}</td><td><span class="old">{{ relay }}</span></td><td><span class="new">{{ remote_value }}</span></td></tr>{% endfor %}</tbody></table></div>
+  {% endif %}
+  <div class="actions-row">
+    {% if item.kind=='operation' %}
+      <form method="post" action="/operations/{{ item.op.id }}/reconcile">{{ ui.csrf_field() }}<button class="btn btn-ghost btn-sm" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('check_again') }}</span></button></form>
+      <form method="post" action="/operations/{{ item.op.id }}/repair">{{ ui.csrf_field() }}<button class="btn btn-ghost btn-sm" data-working="{{ t('working') }}">{{ ui.icon('right') }}<span>{{ t('retry_send') }}</span></button></form>
+      <form method="post" action="/operations/{{ item.op.id }}/done">{{ ui.csrf_field() }}{{ ui.confirm_button(t('mark_done'), None, 'ghost btn-sm', 'check') }}</form>
+    {% elif item.kind=='failed' and item.op %}
+      <form method="post" action="/operations/{{ item.op.id }}/retry">{{ ui.csrf_field() }}<input type="hidden" name="operation_id" value="{{ new_id() }}"><button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('retry_unsent') }}</span></button></form>
+    {% elif item.issue in ('remote_changed','remote_identity','remote_drift') %}
+      <form method="post" action="/customers/{{ item.customer_id }}/accept">{{ ui.csrf_field() }}<button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('accept_remote') }}</span></button></form>
+    {% endif %}
+    <form method="post" action="/customers/{{ item.customer_id }}/delete">{{ ui.csrf_field() }}<input type="hidden" name="operation_id" value="{{ new_id() }}">{{ ui.confirm_button(t('remove_customer'), None, 'danger btn-sm') }}</form>
+    {% if item.op %}<details class="tech"><summary>{{ t('technical') }}</summary><code>{{ item.op.id }} · {{ item.op.kind }} · {{ item.op.status }} · {{ item.op.diagnostic or '—' }} · by {{ item.op.actor_name or 'system' }}</code></details>{% endif %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

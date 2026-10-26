@@ -1,1 +1,28 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><h1>{{ customer.email }}</h1><a class="button" href="/customers/{{ customer.id }}">{{ t('back') }}</a></div><section class="panel"><h2>{{ t('subscription_link') }}</h2><div class="link-row"><div><a class="subscription-url" href="{{ subscription_link }}" dir="ltr">{{ subscription_link }}</a><input type="hidden" id="subscription-link" value="{{ subscription_link }}"><button type="button" data-copy="subscription-link" data-copied="{{ t('copied') }}">{{ t('copy') }}</button></div></div></section><section class="panel"><h2>{{ t('config_uris') }}</h2>{% for link in links %}<div class="link-row"><div><textarea readonly aria-label="{{ t('config_uris') }}" id="connection-{{ loop.index0 }}">{{ link }}</textarea><button type="button" data-copy="connection-{{ loop.index0 }}" data-copied="{{ t('copied') }}">{{ t('copy') }}</button></div></div>{% else %}<p class="muted">{{ t('no_links') }}</p>{% endfor %}</section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('links') }}{% endblock %}
+{% block heading %}<a href="/customers" class="crumb">{{ t('customers') }}</a> / <a href="/customers/{{ customer.id }}" class="crumb">{{ display_name(customer.email) }}</a> / {{ t('links') }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>{{ t('links') }}</h1><p class="muted">{{ display_name(customer.email) }}</p></div>
+  <div class="actions-row"><a class="btn btn-ghost" href="/customers/{{ customer.id }}">{{ ui.icon('left') }}<span>{{ t('back') }}</span></a></div>
+</div>
+{% if subscription_link %}
+<section class="card">
+  <header class="card-head"><h2>{{ ui.icon('link') }} {{ t('subscription_link') }}</h2></header>
+  <p class="muted">{{ t('subscription_hint') }}</p>
+  <div class="copy-row"><input readonly id="subscription-link" value="{{ subscription_link }}" dir="ltr" aria-label="{{ t('subscription_link') }}"><button type="button" class="btn btn-primary" data-copy="subscription-link">{{ ui.icon('copy') }}<span>{{ t('copy') }}</span></button></div>
+</section>
+{% endif %}
+<section class="card">
+  <header class="card-head"><h2>{{ ui.icon('server') }} {{ t('config_uris') }}</h2></header>
+  <p class="muted">{{ t('config_hint') }}</p>
+  {% for link in links %}
+  <div class="copy-block">
+    <div class="copy-title"><b>{{ link.name }}</b><button type="button" class="btn btn-ghost btn-sm" data-copy="connection-{{ loop.index0 }}">{{ ui.icon('copy') }}<span>{{ t('copy') }}</span></button></div>
+    <textarea readonly rows="2" id="connection-{{ loop.index0 }}" dir="ltr" aria-label="{{ link.name }}">{{ link.uri }}</textarea>
+  </div>
+  {% else %}
+  <div class="empty small">{{ ui.icon('link') }}<p>{{ t('no_links') }}</p></div>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -207,7 +207,13 @@ def test_config_rejects_db_collision(tmp_path):
 
 def test_public_http_config_requires_remote_origin_and_valid_path(tmp_path):
     path=str(tmp_path/'app.db')
-    Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret').validate()
+    master=dict(xui_database_paths='/etc/x-ui/x-ui.db',xui_url='https://panel.invalid/',xui_token='t')
+    Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret',**master).validate()
+    # Public HTTP keeps the production configuration checks.
+    with pytest.raises(ValueError,match='XUI_DATABASE_PATHS'):
+        Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret').validate()
+    with pytest.raises(ValueError,match='master'):
+        Config(path,'http://203.0.113.10:8095',production=False,public_http=True,base_path='/relay-secret',xui_database_paths='/etc/x-ui/x-ui.db').validate()
     with pytest.raises(ValueError):
         Config(path,'http://localhost:8095',production=False,public_http=True,base_path='/relay-secret').validate()
     with pytest.raises(ValueError):
@@ -227,3 +233,31 @@ def test_original_service_never_mutated_static():
     assert "SERVICE='xui-reseller.service'" in source
     assert "['systemctl','restart','x-ui.service']" not in source
     assert 'XUI_DB_DSN' not in source and 'XUI_DB_TYPE' not in source
+
+
+def test_same_vps_http_address_becomes_loopback(monkeypatch):
+    lifecycle=ops
+    monkeypatch.setattr(lifecycle,'is_this_machine',lambda host: host=='203.0.113.5')
+    assert lifecycle.normalize_master_url('http://203.0.113.5:2052/x-ui/')==('http://127.0.0.1:2052/x-ui/','203.0.113.5')
+    assert lifecycle.normalize_master_url('203.0.113.5:2052/x-ui')==('http://127.0.0.1:2052/x-ui/','203.0.113.5')
+    # Another server, HTTPS or already loopback: unchanged.
+    assert lifecycle.normalize_master_url('http://198.51.100.9:2052/x-ui/')==('http://198.51.100.9:2052/x-ui/','')
+    assert lifecycle.normalize_master_url('https://203.0.113.5:2052/x-ui/')==('https://203.0.113.5:2052/x-ui/','')
+    assert lifecycle.normalize_master_url('http://127.0.0.1:2052/x-ui')==('http://127.0.0.1:2052/x-ui/','')
+
+
+def test_is_this_machine_detects_loopback_only_for_local_addresses():
+    lifecycle=ops
+    assert lifecycle.is_this_machine('127.0.0.1')
+    assert not lifecycle.is_this_machine('192.0.2.123')
+    assert not lifecycle.is_this_machine('no-such-host.invalid')
+
+
+def test_version_file_is_single_source():
+    from pathlib import Path
+    import reseller
+    version=(Path(__file__).parents[1]/'VERSION').read_text().strip()
+    assert reseller.__version__==version
+    parts=version.split('.')
+    assert len(parts)==3 and all(p.isdigit() for p in parts)
+    assert f'## [{version}]' in (Path(__file__).parents[1]/'CHANGELOG.md').read_text()

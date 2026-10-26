@@ -1,1 +1,40 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><h1>{{ t('resellers') }}</h1><a class="button primary" href="/resellers/new">＋ {{ t('new_reseller') }}</a></div><form class="filters"><input aria-label="{{ t('search') }}" name="q" value="{{ q }}" placeholder="{{ t('search') }}"><select name="status" aria-label="{{ t('status') }}"><option value="">{{ t('all') }}</option>{% for v in ['active','expired','suspended'] %}<option value="{{ v }}" {{ 'selected' if filters.get('status')==v }}>{{ t(v) }}</option>{% endfor %}</select><select name="sort" aria-label="{{ t('sort') }}">{% for v in ['username','created','sold'] %}<option value="{{ v }}" {{ 'selected' if filters.get('sort')==v }}>{{ t(v) }}</option>{% endfor %}</select><button>{{ t('search') }}</button></form><div class="panel table-wrap"><table><thead><tr><th>{{ t('username') }}</th><th>{{ t('tag') }}</th><th>{{ t('status') }}</th><th>{{ t('lifetime') }}</th><th>{{ t('created') }}</th><th>{{ t('actions') }}</th></tr></thead><tbody>{% for r in rows %}<tr><td>{{ r.username }}</td><td>{{ r.tag }}</td><td><span class="badge {{ 'warning' if r.suspended else 'good' }}">{{ t('suspended' if r.suspended else 'active' if r.plan_active else 'expired') }}</span></td><td>{{ gb(r.lifetime or 0) }} GB</td><td>{{ date(r.created) }}</td><td><a href="/resellers/{{ r.id }}">{{ t('details') }} →</a></td></tr>{% else %}<tr><td colspan="6" class="empty">{{ t('empty') }}</td></tr>{% endfor %}</tbody></table></div><div class="pagination">{% if page>1 %}<a href="{{ request.url.include_query_params(page=page-1) }}">{{ t('previous') }}</a>{% endif %}<span>{{ number(page) }}</span>{% if rows|length==25 %}<a href="{{ request.url.include_query_params(page=page+1) }}">{{ t('next') }}</a>{% endif %}</div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('resellers') }}{% endblock %}
+{% block heading %}{{ t('resellers') }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>{{ t('resellers') }}</h1><p class="muted">People who sell packages on your 3X-UI. Each has a plan with a data size and an end date.</p></div>
+  <div class="actions-row"><a class="btn btn-primary" href="/resellers/new">{{ ui.icon('plus') }}<span>{{ t('new_reseller') }}</span></a></div>
+</div>
+<section class="card card-flush">
+  <div class="toolbar">
+    <nav class="chips" aria-label="Filter">
+      {% for key,label in [('','filter_all'),('active','filter_active'),('expired','expired_plan'),('suspended','filter_suspended')] %}
+      <a class="chip {{ 'chip-on' if status_filter==key }}" href="{{ link(status=key, page='') }}">{{ t(label) }}</a>
+      {% endfor %}
+    </nav>
+    <form class="search" role="search">
+      {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+      <span class="input-icon">{{ ui.icon('search') }}<input name="q" value="{{ q }}" placeholder="{{ t('search_resellers') }}" aria-label="{{ t('search_resellers') }}"></span>
+      <select name="sort" aria-label="{{ t('sort') }}" data-autosubmit>{% for v in ['username','created','sold'] %}<option value="{{ v }}" {{ 'selected' if filters.get('sort','username')==v }}>{{ t('sort_'+v) }}</option>{% endfor %}</select>
+      <button class="btn btn-ghost">{{ t('search') }}</button>
+    </form>
+  </div>
+  {% if rows %}
+  <div class="table-wrap"><table class="table table-cards">
+    <thead><tr><th>{{ t('reseller') }}</th><th>{{ t('status') }}</th><th>{{ t('plan') }}</th><th class="num">{{ t('reseller_customers') }}</th><th class="num">{{ t('lifetime') }}</th><th class="actions-col"><span class="sr">{{ t('details') }}</span></th></tr></thead>
+    <tbody>{% for r in rows %}<tr>
+      <td data-label="{{ t('reseller') }}"><div class="cell-main"><span class="avatar sm">{{ r.username[:1]|upper }}</span><div><a class="strong-link" href="/resellers/{{ r.id }}">{{ r.username }}</a><small class="muted">{{ r.tag }}</small></div></div></td>
+      <td data-label="{{ t('status') }}">{% if r.suspended %}{{ ui.tag('suspended','danger') }}{% elif r.allowance %}{{ ui.tag('active','success') }}{% else %}{{ ui.tag('expired_plan','warning') }}{% endif %}</td>
+      <td data-label="{{ t('plan') }}" class="usage-cell">{% if r.allowance %}<div class="bar-label"><span>{{ gb(r.sold+r.reserved) }} / {{ gb(r.allowance) }} GB</span><small class="muted">{{ expiry_text(r.plan_expires*1000) }}</small></div>{{ ui.progress(r.sold+r.reserved, r.allowance) }}{% else %}<span class="muted">{{ t('no_plan') }}</span>{% endif %}</td>
+      <td data-label="{{ t('reseller_customers') }}" class="num">{{ number(r.customers) }}</td>
+      <td data-label="{{ t('lifetime') }}" class="num">{{ gb(r.lifetime or 0) }} GB</td>
+      <td class="actions-col"><a class="btn btn-ghost btn-sm" href="/resellers/{{ r.id }}">{{ t('details') }}{{ ui.icon('right') }}</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {{ ui.pager(page, rows|length==25) }}
+  {% else %}
+  {{ ui.empty('resellers', t('no_resellers') if not q and not status_filter else t('no_results'), '/resellers/new' if not q and not status_filter else None, t('new_reseller')) }}
+  {% endif %}
+</section>
+{% endblock %}

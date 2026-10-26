@@ -1,2 +1,162 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><h1>{{ reseller.username if reseller else t('new_reseller') }}</h1><a class="button" href="/resellers">{{ t('cancel') }}</a></div><form method="post" class="panel stack"><input type="hidden" name="csrf" value="{{ csrf }}"><div class="form-grid">{% if not reseller %}<label>{{ t('username') }}<input name="username" required maxlength="64"></label><label>{{ t('tag') }}<input name="tag" required maxlength="64"></label>{% else %}<label>{{ t('username') }}<input name="username" value="{{ reseller.username }}" required maxlength="64"></label><div><span class="muted">{{ t('tag') }}</span><h2>{{ reseller.tag }}</h2><p>{{ t('permission_hint') }}</p></div>{% endif %}<label>{{ t('reset_password' if reseller else 'password') }}<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" {{ 'required' if not reseller }}></label>{% if not reseller %}<label>{{ t('volume') }}<input name="volume" type="number" min="0.001" step="0.001" required></label><label>{{ t('expiry') }}<input name="expiry" type="datetime-local" required></label>{% else %}<label class="check"><input type="checkbox" name="suspended" {{ 'checked' if reseller.suspended }}> {{ t('suspended') }}</label><label>{{ t('notes') }}<textarea name="notes" maxlength="2000">{{ reseller.notes }}</textarea></label>{% endif %}</div><fieldset><legend>{{ t('allowed') }}</legend><div class="inbound-grid">{% for i in inbounds %}<label class="inbound check"><input type="checkbox" name="inbounds" value="{{ i.id }}" {{ 'checked' if i.id in selected }} {{ 'disabled' if i.protocol not in PROTOCOLS }}><span><b>{{ i.name or t('unnamed_inbound') }}</b></span></label>{% else %}<p>{{ t('inbound_unavailable') }}</p><a href="/inbounds">{{ t('refresh') }}</a>{% endfor %}</div></fieldset><div class="form-footer"><a href="/resellers">{{ t('cancel') }}</a><button class="primary">{{ t('save') }}</button></div></form>
-{% if reseller %}<div class="form-grid">{% for action,label in [('renew','renew'),('adjust','plan_adjust')] %}<form method="post" action="/resellers/{{ reseller.id }}/{{ action }}" class="panel stack"><h2>{{ t(label) }}</h2><input type="hidden" name="csrf" value="{{ csrf }}"><label>{{ t('volume') }}<input name="volume" type="number" min="0.001" step="0.001" required></label><label>{{ t('expiry') }}<input name="expiry" type="datetime-local" required></label><button>{{ t('save') }}</button></form>{% endfor %}</div><section class="panel"><h2>{{ t('history') }}</h2><div class="table-wrap"><table><thead><tr><th>ID</th><th>{{ t('granted') }}</th><th>{{ t('sold') }}</th><th>{{ t('reserved') }}</th><th>{{ t('expiry') }}</th><th>{{ t('status') }}</th></tr></thead><tbody>{% for g in history %}<tr><td>{{ g.id }}</td><td>{{ gb(g.allowance) }}</td><td>{{ gb(g.sold) }}</td><td>{{ gb(g.reserved) }}</td><td>{{ date(g.expires) }}</td><td>{{ t('expired' if g.closed or g.expires<=now else 'active') }}</td></tr>{% endfor %}</tbody></table></div></section><section class="panel"><h2>{{ t('ledger') }}</h2>{% include '_ledger.html' %}</section>{% endif %}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ reseller.username if reseller else t('new_reseller') }}{% endblock %}
+{% block heading %}<a href="/resellers" class="crumb">{{ t('resellers') }}</a> / {{ reseller.username if reseller else t('new_reseller') }}{% endblock %}
+
+
+
+{% block body %}
+{% macro inbound_choices(selected) -%}
+<div class="choice-grid" role="group" aria-label="{{ t('allowed') }}">
+  {% for i in inbounds %}
+  <label class="choice {{ 'choice-off' if i.protocol not in PROTOCOLS }}">
+    <input type="checkbox" name="inbounds" value="{{ i.id }}" {{ 'checked' if i.id in selected }} {{ 'disabled' if i.protocol not in PROTOCOLS }}>
+    <span class="choice-body"><b>{{ i.name or t('unnamed_inbound') }}</b><small><span class="tag tag-proto">{{ i.protocol }}</span> port {{ i.port }}{% if i.protocol not in PROTOCOLS %} · {{ t('unsupported') }}{% elif not i.available %} · {{ t('disabled') }}{% endif %}</small></span>
+    <span class="choice-check">{{ ui.icon('check') }}</span>
+  </label>
+  {% else %}
+  <div class="empty small">{{ ui.icon('server') }}<p>No inbounds yet. Press “{{ t('sync_now') }}” at the top to load them from 3X-UI.</p></div>
+  {% endfor %}
+</div>
+{%- endmacro %}
+{% if not reseller %}
+<div class="page-head"><div><h1>{{ t('new_reseller') }}</h1><p class="muted">Create an account for someone who sells packages. They get a plan with a data size and an end date.</p></div>
+<div class="actions-row"><a class="btn btn-ghost" href="/resellers">{{ t('cancel') }}</a></div></div>
+<form method="post" class="form-layout" novalidate>
+  {{ ui.csrf_field() }}
+  <div class="form-main">
+    <section class="card">
+      <header class="card-head"><h2>{{ ui.icon('user') }} Account</h2></header>
+      <div class="grid-2">
+        <label class="field">{{ t('username') }}<input name="username" required maxlength="64" autocomplete="off" spellcheck="false" value="{{ form_data.get('username','') }}" {{ ui.invalid('username') }}>{{ ui.field_error('username') }}</label>
+        <label class="field">{{ t('tag') }}<input name="tag" required maxlength="64" autocomplete="off" spellcheck="false" value="{{ form_data.get('tag','') }}" {{ ui.invalid('tag') }}><small class="hint">{{ t('tag_hint') }}</small>{{ ui.field_error('tag') }}</label>
+      </div>
+      <label class="field">{{ t('password') }}<span class="input-icon">{{ ui.icon('key') }}<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required {{ ui.invalid('password') }}><button type="button" class="reveal" data-reveal aria-label="{{ t('show') }}">{{ ui.icon('eye') }}</button></span>
+        <small class="hint">{{ t('password_policy') }} The reseller must change it at first sign-in.</small>{{ ui.field_error('password') }}</label>
+    </section>
+    <section class="card">
+      <header class="card-head"><h2>{{ ui.icon('plan') }} First plan</h2></header>
+      <div class="grid-2">
+        <label class="field">{{ t('granted') }}<span class="input-suffix"><input id="plan-volume" name="volume" type="number" min="0.01" step="0.01" required value="{{ form_data.get('volume','') }}" {{ ui.invalid('volume') }}><span>GB</span></span>
+          <span class="quick">{% for n in (100,500,1000) %}<button type="button" class="chip" data-fill="plan-volume" data-value="{{ n }}">{{ n }} GB</button>{% endfor %}</span>{{ ui.field_error('volume') }}</label>
+        <label class="field">{{ t('plan_expires') }}<input id="plan-expiry" name="expiry" type="datetime-local" required value="{{ form_data.get('expiry','') }}" {{ ui.invalid('expiry') }}>
+          <span class="quick">{% for d in quick_days %}<button type="button" class="chip" data-add-days="{{ d }}" data-target="plan-expiry">+{{ d }} {{ t('days_unit') }}</button>{% endfor %}</span>{{ ui.field_error('expiry') }}</label>
+      </div>
+    </section>
+    <section class="card">
+      <header class="card-head"><h2>{{ ui.icon('server') }} {{ t('allowed') }}</h2></header>
+      <p class="muted">{{ t('allowed_hint') }}</p>{{ ui.field_error('inbounds') }}
+      {{ inbound_choices(selected) }}
+    </section>
+  </div>
+  <aside class="form-side"><section class="card summary"><h2>{{ t('new_reseller') }}</h2><p class="muted">You can change the plan, inbounds and password later.</p>
+    <button class="btn btn-primary btn-block" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('create') }}</span></button>
+    <a class="btn btn-ghost btn-block" href="/resellers">{{ t('cancel') }}</a></section></aside>
+</form>
+{% else %}
+<div class="page-head">
+  <div class="cell-main"><span class="avatar lg">{{ reseller.username[:1]|upper }}</span><div>
+    <h1 class="title-with-tag">{{ reseller.username }} {% if reseller.suspended %}{{ ui.tag('suspended','danger') }}{% elif plan %}{{ ui.tag('active','success') }}{% else %}{{ ui.tag('expired_plan','warning') }}{% endif %}</h1>
+    <p class="muted">{{ t('tag') }}: <code>{{ reseller.tag }}</code> · {{ number(customer_total) }} {{ t('customers')|lower }} · {{ t('created') }} {{ date(reseller.created) }}{% if reseller.last_login %} · last sign-in {{ rel(reseller.last_login) }}{% endif %}</p>
+  </div></div>
+  <div class="actions-row"><a class="btn btn-ghost" href="/customers?owner={{ reseller.id }}">{{ ui.icon('customers') }}<span>{{ t('customers') }}</span></a></div>
+</div>
+
+<nav class="tabs" role="tablist">
+  {% for key,label in [('overview','overview'),('plan','plan_tab'),('activity','activity'),('danger','danger_zone')] %}
+  <a href="/resellers/{{ reseller.id }}?tab={{ key }}" role="tab" data-tab="{{ key }}" class="tab {{ 'tab-on' if tab==key }} {{ 'tab-danger' if key=='danger' }}" aria-selected="{{ 'true' if tab==key else 'false' }}">{{ t(label) }}</a>
+  {% endfor %}
+</nav>
+
+<div class="tab-panel" id="tab-overview" {{ 'hidden' if tab!='overview' }}>
+  <form method="post" action="/resellers/{{ reseller.id }}" class="form-layout" novalidate>
+    {{ ui.csrf_field() }}
+    <div class="form-main">
+      <section class="card">
+        <header class="card-head"><h2>{{ ui.icon('user') }} Account</h2></header>
+        <div class="grid-2">
+          <label class="field">{{ t('username') }}<input name="username" value="{{ form_data.get('username', reseller.username) }}" required maxlength="64" spellcheck="false" {{ ui.invalid('username') }}>{{ ui.field_error('username') }}</label>
+          <label class="field">{{ t('reset_password') }}<span class="input-icon">{{ ui.icon('key') }}<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" {{ ui.invalid('password') }}><button type="button" class="reveal" data-reveal aria-label="{{ t('show') }}">{{ ui.icon('eye') }}</button></span><small class="hint">{{ t('reset_password_hint') }}</small>{{ ui.field_error('password') }}</label>
+        </div>
+        <label class="field">{{ t('notes') }}<textarea name="notes" maxlength="2000" rows="2" placeholder="Only admins see this">{{ form_data.get('notes', reseller.notes) }}</textarea></label>
+        <label class="switch"><input type="checkbox" name="suspended" {{ 'checked' if form_data.get('suspended', reseller.suspended) }}><span class="switch-track danger"></span><span>{{ t('suspend') }}</span></label>
+        <small class="hint">{{ t('suspend_hint') }}</small>
+      </section>
+      <section class="card">
+        <header class="card-head"><h2>{{ ui.icon('server') }} {{ t('allowed') }}</h2></header>
+        <p class="muted">{{ t('allowed_hint') }}</p>{{ ui.field_error('inbounds') }}
+        {{ inbound_choices(selected) }}
+      </section>
+    </div>
+    <aside class="form-side">
+      <section class="card summary">
+        <h2>{{ t('plan') }}</h2>
+        {% if plan %}
+        <div class="bar-label"><span>{{ gb(plan.sold+plan.reserved) }} / {{ gb(plan.allowance) }} GB</span><small class="muted">{{ expiry_text(plan.expires*1000) }}</small></div>
+        {{ ui.progress(plan.sold+plan.reserved, plan.allowance) }}
+        <dl class="kv"><div><dt>{{ t('plan_left') }}</dt><dd>{{ gb([0,plan.allowance-plan.sold-plan.reserved]|max) }} GB</dd></div><div><dt>{{ t('plan_expires') }}</dt><dd>{{ date(plan.expires) }}</dd></div></dl>
+        {% else %}<p class="muted">{{ t('no_plan') }}. <a href="/resellers/{{ reseller.id }}?tab=plan">{{ t('renew') }}</a></p>{% endif %}
+        <button class="btn btn-primary btn-block" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button>
+        <small class="hint">Saving signs this reseller out so the changes apply right away.</small>
+      </section>
+    </aside>
+  </form>
+</div>
+
+<div class="tab-panel" id="tab-plan" {{ 'hidden' if tab!='plan' }}>
+  <div class="grid-2">
+    <form method="post" action="/resellers/{{ reseller.id }}/renew" class="card stack" novalidate>
+      <header class="card-head"><h2>{{ ui.icon('plus') }} {{ t('renew') }}</h2></header>
+      <p class="muted">{{ t('renew_hint') }}</p>
+      {% if renew_error %}{{ ui.alert('danger', t(renew_error), false) }}{% endif %}
+      {{ ui.csrf_field() }}
+      <label class="field">{{ t('granted') }}<span class="input-suffix"><input id="renew-volume" name="volume" type="number" min="0.01" step="0.01" required value="{{ renew_data.get('volume','') }}"><span>GB</span></span>
+        <span class="quick">{% for n in (100,500,1000) %}<button type="button" class="chip" data-fill="renew-volume" data-value="{{ n }}">{{ n }} GB</button>{% endfor %}</span></label>
+      <label class="field">{{ t('plan_expires') }}<input id="renew-expiry" name="expiry" type="datetime-local" required value="{{ renew_data.get('expiry', plan_defaults.expiry) }}">
+        <span class="quick">{% for d in quick_days %}<button type="button" class="chip" data-add-days="{{ d }}" data-target="renew-expiry" data-from-now>{{ d }} {{ t('days_unit') }} from now</button>{% endfor %}</span></label>
+      <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('renew') }}</span></button></div>
+    </form>
+    <form method="post" action="/resellers/{{ reseller.id }}/adjust" class="card stack" novalidate>
+      <header class="card-head"><h2>{{ ui.icon('edit') }} {{ t('plan_adjust') }}</h2></header>
+      <p class="muted">{{ t('plan_adjust_hint') }}</p>
+      {% if adjust_error %}{{ ui.alert('danger', t(adjust_error), false) }}{% endif %}
+      {{ ui.csrf_field() }}
+      {% if plan %}
+      <label class="field">{{ t('granted') }}<span class="input-suffix"><input name="volume" type="number" min="0.01" step="0.01" required value="{{ adjust_data.get('volume', plan_defaults.volume) }}"><span>GB</span></span><small class="hint">At least {{ gb(plan.sold+plan.reserved) }} GB (already sold or on hold).</small></label>
+      <label class="field">{{ t('plan_expires') }}<input id="adjust-expiry" name="expiry" type="datetime-local" required value="{{ adjust_data.get('expiry', plan_defaults.expiry) }}">
+        <span class="quick">{% for d in quick_days %}<button type="button" class="chip" data-add-days="{{ d }}" data-target="adjust-expiry">+{{ d }} {{ t('days_unit') }}</button>{% endfor %}</span></label>
+      <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
+      {% else %}<p class="muted">There is no active plan to change. Start a new plan instead.</p>{% endif %}
+    </form>
+  </div>
+  <section class="card">
+    <header class="card-head"><h2>{{ t('history') }}</h2></header>
+    <div class="table-wrap"><table class="table table-cards">
+      <thead><tr><th>{{ t('plan') }}</th><th>{{ t('granted') }}</th><th>{{ t('sold') }}</th><th>{{ t('plan_hold') }}</th><th>{{ t('plan_expires') }}</th><th>{{ t('status') }}</th></tr></thead>
+      <tbody>{% for g in history %}<tr>
+        <td data-label="{{ t('plan') }}">#{{ loop.revindex }}</td><td data-label="{{ t('granted') }}">{{ gb(g.allowance) }} GB</td><td data-label="{{ t('sold') }}">{{ gb(g.sold) }} GB</td>
+        <td data-label="{{ t('plan_hold') }}">{{ gb(g.reserved) }} GB</td><td data-label="{{ t('plan_expires') }}">{{ date(g.expires) }}</td>
+        <td data-label="{{ t('status') }}">{{ ui.tag('expired','muted') if g.closed or g.expires<=now else ui.tag('active','success') }}</td>
+      </tr>{% else %}<tr><td colspan="6" class="muted">{{ t('empty') }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  <section class="card">
+    <header class="card-head"><h2>{{ t('ledger') }}</h2></header>
+    {% if ledger %}<ul class="moves">{% for m in ledger %}
+      <li><span class="tag tag-{{ m.tone }}">{{ m.label }}</span><span class="moves-what">{% if m.customer %}<a href="/customers/{{ m.customer_id }}">{{ display_name(m.customer) }}</a>{% endif %}<small class="muted"> · {{ m.by }}</small></span><b class="moves-amount">{{ m.amount }}</b><time class="muted" title="{{ date(m.created) }}">{{ rel(m.created) }}</time></li>
+    {% endfor %}</ul>{% else %}<div class="empty small">{{ ui.icon('data') }}<p>{{ t('empty') }}</p></div>{% endif %}
+  </section>
+</div>
+
+<div class="tab-panel" id="tab-activity" {{ 'hidden' if tab!='activity' }}>
+  <section class="card"><header class="card-head"><h2>{{ t('activity') }}</h2><a class="link-sm" href="/activity?reseller={{ reseller.id }}">{{ t('see_all') }} →</a></header>{{ ui.feed_list(feed) }}</section>
+</div>
+
+<div class="tab-panel" id="tab-danger" {{ 'hidden' if tab!='danger' }}>
+  <section class="card card-danger">
+    <header class="card-head"><h2>{{ ui.icon('trash') }} {{ t('delete_reseller') }}</h2></header>
+    <p>{{ t('delete_reseller_hint')|replace('{n}', number(customer_total)) }}</p>
+    <form method="post" action="/resellers/{{ reseller.id }}/delete">{{ ui.csrf_field() }}{{ ui.confirm_button(t('delete_reseller'), 'Click again: delete '+reseller.username+' and '+customer_total|string+' customers') }}</form>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

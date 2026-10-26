@@ -1,3 +1,64 @@
-<!doctype html><html lang="{{ lang }}" dir="{{ 'rtl' if lang=='fa' else 'ltr' }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="{{ base_path }}/"><title>{{ t('brand') }}</title><link rel="stylesheet" href="static/app.css"><script src="static/app.js" defer></script></head>
-<body data-invalid="{{ t('invalid_input') }}" data-base-path="{{ base_path }}"><aside class="sidebar"><a class="brand" href="/"><span class="mark">R</span><span>RELAY<small>{{ t('brand') }}</small></span></a>{% if user %}<div class="workspace">{{ user.username }}<span class="badge">{{ t('resellers') if user.role=='reseller' else t('admin') }}</span></div><nav>{% for url,label,icon in [('/','dashboard','◈'),('/customers','customers','◎'),('/resellers','resellers','◇'),('/inbounds','inbounds','⇄'),('/operations','operations','≡'),('/account','account','⌘')] %}{% if user.role=='admin' or label not in ['resellers','inbounds','operations'] %}<a class="{{ 'selected' if path==url }}" href="{{ url }}"><span>{{ icon }}</span>{{ t(label) }}</a>{% endif %}{% endfor %}</nav>{% endif %}<div class="sidebar-bottom"><a href="/language?lang={{ 'en' if lang=='fa' else 'fa' }}">{{ 'English · EN' if lang=='fa' else 'فارسی · FA' }}</a><small>3X-UI v3.8.5</small>{% if user %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="ghost">{{ t('logout') }}</button></form>{% endif %}</div></aside>
-<main><header class="topbar"><span>{{ t('brand') }}</span><span class="muted">{{ t('timezone') }} {{ timezone }}</span></header><div class="content">{% if message %}<div class="notice" role="status">{{ t(message) }}</div>{% endif %}{% block body %}{% endblock %}</div></main><div id="toast" role="status" hidden></div></body></html>
+{% import '_ui.html' as ui with context %}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<base href="{{ base_path }}/">
+<title>{% block title %}{{ t('brand') }}{% endblock %} · Relay</title>
+<script src="static/theme.js"></script>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="static/app.css">
+<script src="static/app.js" defer></script>
+</head>
+<body data-base-path="{{ base_path }}" data-invalid="{{ t('invalid_input') }}" data-copied="{{ t('copied') }}" class="{{ 'signed-in' if user else 'signed-out' }}">
+{% if user %}
+{%- set nav = [('/','dashboard','dashboard',false),('/customers','customers','customers',false),('/resellers','resellers','resellers',true),
+               ('/inbounds','inbounds','server',true),('/activity','activity','activity',false),('/attention','attention','alert',true),('/account','account','lock',false)] -%}
+<div class="layout">
+  <aside class="sidebar" id="sidebar" aria-label="{{ t('menu') }}">
+    <a class="brand" href="/"><span class="brand-mark">R</span><span class="brand-text"><b>{{ t('brand') }}</b><small>{{ t('brand_sub') }}</small></span></a>
+    <nav class="nav">
+      {% for url,label,icon_name,admin_only in nav %}{% if not admin_only or user.role=='admin' %}
+      {%- set selected = path==url or (url!='/' and path.startswith(url)) -%}
+      <a class="nav-item {{ 'selected' if selected }}" href="{{ url }}" {{ 'aria-current=page' if selected }}>{{ ui.icon(icon_name) }}<span>{{ t(label) }}</span>{% if label=='attention' and attention_total %}<span class="nav-badge">{{ attention_total }}</span>{% endif %}</a>
+      {% endif %}{% endfor %}
+    </nav>
+    <div class="sidebar-user">
+      <span class="avatar">{{ user.username[:1]|upper }}</span>
+      <div class="sidebar-user-text"><b>{{ user.username }}</b><small>{{ t('admin') if user.role=='admin' else t('reseller') }} · v{{ version }}</small></div>
+      <form method="post" action="/logout">{{ ui.csrf_field() }}<button class="btn-icon" title="{{ t('logout') }}" aria-label="{{ t('logout') }}">{{ ui.icon('logout') }}</button></form>
+    </div>
+  </aside>
+  <div class="backdrop" data-close-sidebar></div>
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="btn-icon menu-toggle" data-toggle-sidebar aria-label="{{ t('menu') }}" aria-controls="sidebar">{{ ui.icon('menu') }}</button>
+      <div class="topbar-title">{% block heading %}{% endblock %}</div>
+      <div class="topbar-actions">
+        {% if sync %}
+        <span class="sync-pill {{ 'sync-bad' if sync.failing else 'sync-ok' if sync.ok else 'sync-wait' }}" title="{{ t('last_sync') }}: {{ date(sync.ok) if sync.ok else t('never') }}">
+          <span class="pulse"></span>
+          {% if sync.failing %}{{ t('sync_failing') }}{% elif sync.ok %}{{ t('synced_ago') }} {{ sync.ago }}{% else %}{{ t('sync_waiting') }}{% endif %}
+        </span>
+        <form method="post" action="/sync">{{ ui.csrf_field() }}<button class="btn btn-ghost btn-sm" data-working="{{ t('working') }}" title="{{ t('sync_now') }}">{{ ui.icon('sync') }}<span class="hide-sm">{{ t('sync_now') }}</span></button></form>
+        {% endif %}
+        <button type="button" class="btn-icon" data-theme-toggle title="{{ t('theme') }}" aria-label="{{ t('theme') }}">{{ ui.icon('sun','when-dark') }}{{ ui.icon('moon','when-light') }}</button>
+      </div>
+    </header>
+    <main class="content" id="content">
+      {% if message %}{{ ui.alert('success', t(message)) }}{% endif %}
+      {% if error %}{{ ui.alert('danger', t(error)) }}{% endif %}
+      {% if page_error %}{{ ui.alert('danger', t(page_error)) }}{% endif %}
+      {% if sync and sync.failing and user.role=='admin' %}{{ ui.alert('warning', t(sync.code) if sync.code!='error' else t('remote_unavailable'), false, t('sync_failing')+':') }}{% endif %}
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% else %}
+<main class="auth-wrap">
+  <button type="button" class="btn-icon theme-corner" data-theme-toggle title="{{ t('theme') }}" aria-label="{{ t('theme') }}">{{ ui.icon('sun','when-dark') }}{{ ui.icon('moon','when-light') }}</button>
+  {% block auth %}{% endblock %}
+</main>
+{% endif %}
+</body>
+</html>

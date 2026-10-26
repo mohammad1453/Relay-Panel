@@ -1,1 +1,28 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><h1>{{ t('inbounds') }}</h1><form method="post" action="/sync"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary" data-working="{{ t('working') }}">↻ {{ t('refresh') }}</button></form></div><div class="panel table-wrap"><table><thead><tr><th>{{ t('inbounds') }}</th><th>{{ t('protocol') }}</th><th>{{ t('port') }}</th><th>{{ t('status') }}</th><th>{{ t('time') }}</th></tr></thead><tbody>{% for i in inbounds %}<tr><td>{{ i.name or t('unnamed_inbound') }}</td><td><span class="badge">{{ i.protocol }}</span></td><td>{{ i.port }}</td><td>{{ t('active' if i.available and i.protocol in PROTOCOLS else 'unavailable_protocol' if i.protocol not in PROTOCOLS else 'inbound_unavailable') }}</td><td>{{ date(i.synced) }}</td></tr>{% else %}<tr><td colspan="5" class="empty">{{ t('empty') }}</td></tr>{% endfor %}</tbody></table></div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('inbounds') }}{% endblock %}
+{% block heading %}{{ t('inbounds') }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div><h1>{{ t('inbounds') }}</h1><p class="muted">{{ t('inbounds_hint') }}</p></div>
+  <form method="post" action="/sync">{{ ui.csrf_field() }}<button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('sync_now') }}</span></button></form>
+</div>
+<section class="card card-flush">
+  {% if inbounds %}
+  <div class="table-wrap"><table class="table table-cards">
+    <thead><tr><th>#</th><th>{{ t('inbound_name') }}</th><th>{{ t('protocol') }}</th><th>{{ t('port') }}</th><th>{{ t('status') }}</th><th class="num">{{ t('resellers') }}</th><th class="num">{{ t('customers_count') }}</th><th>{{ t('synced') }}</th></tr></thead>
+    <tbody>{% for i in inbounds %}<tr>
+      <td data-label="#" class="muted">{{ i.id }}</td>
+      <td data-label="{{ t('inbound_name') }}"><b>{{ i.name or t('unnamed_inbound') }}</b></td>
+      <td data-label="{{ t('protocol') }}"><span class="tag tag-proto">{{ i.protocol }}</span></td>
+      <td data-label="{{ t('port') }}"><code>{{ i.port }}</code></td>
+      <td data-label="{{ t('status') }}">{% if i.protocol not in PROTOCOLS %}{{ ui.tag('unsupported','muted') }}{% elif i.available %}{{ ui.tag('available','success') }}{% else %}{{ ui.tag('disabled','warning') }}{% endif %}</td>
+      <td data-label="{{ t('resellers') }}" class="num">{{ i.resellers }}</td>
+      <td data-label="{{ t('customers_count') }}" class="num"><a href="/customers?inbound={{ i.id }}">{{ i.customers }}</a></td>
+      <td data-label="{{ t('synced') }}" title="{{ date(i.synced) }}">{{ rel(i.synced) }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}
+  {{ ui.empty('server', 'No inbounds yet. Press “'+t('sync_now')+'” to load them from 3X-UI.') }}
+  {% endif %}
+</section>
+{% endblock %}

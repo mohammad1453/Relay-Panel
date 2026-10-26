@@ -1,1 +1,12 @@
-{% extends 'base.html' %}{% block body %}<div class="auth panel"><span class="eyebrow">{{ status }}</span><h1>{{ t('error') }}</h1><p role="alert">{{ t(error) }}</p><a class="button" href="{{ '/login' if not user else '/' }}">{{ t('back') }}</a></div>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('error') }}{% endblock %}
+{% block body %}
+<div class="page-head"><div><h1>{{ t('not_found') if page_error=='not_found' else t('forbidden') if page_error=='forbidden' else t('error') }}</h1></div></div>
+<div class="actions-row"><a class="btn btn-ghost" href="/">{{ ui.icon('left') }}<span>{{ t('dashboard') }}</span></a></div>
+{% endblock %}
+{% block auth %}
+<div class="auth-card">
+  {{ ui.alert('danger', t(page_error or 'error'), false) }}
+  <a class="btn btn-primary btn-block" href="/login">{{ ui.icon('login') }}<span>{{ t('login') }}</span></a>
+</div>
+{% endblock %}

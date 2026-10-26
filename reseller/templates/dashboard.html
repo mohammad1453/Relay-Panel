@@ -1,3 +1,92 @@
-{% extends 'base.html' %}{% block body %}<div class="heading"><div><span class="eyebrow">RELAY / {{ user.username }}</span><h1>{{ t('dashboard') }}</h1><p class="muted">{{ t('quota_hint') }}</p></div>{% if user.role=='admin' or writable %}<a class="button primary" href="{{ '/resellers/new' if user.role=='admin' else '/customers/new' }}">＋ {{ t('new_reseller' if user.role=='admin' else 'new_customer') }}</a>{% endif %}</div>
-{% if user.role=='reseller' and not plan %}<div class="notice warning">{{ t('readonly') }}</div>{% endif %}<div class="cards">{% for key,value in stats.items() %}<section class="card"><span>{{ t(key) }}</span><strong>{{ number(value) }}</strong><small>RELAY</small></section>{% endfor %}{% if user.role=='admin' %}{% for key in ['granted','sold'] %}<section class="card"><span>{{ t('total_granted' if key=='granted' else 'lifetime') }}</span><strong>{{ gb(totals[key]) }} <small>GB</small></strong><small>{{ t('history') }}</small></section>{% endfor %}{% elif plan %}{% for key,value in [('granted',plan.allowance),('sold',plan.sold),('remaining',plan.allowance-plan.sold-plan.reserved),('reserved',plan.reserved)] %}<section class="card {{ 'accent' if key=='remaining' }}"><span>{{ t(key) }}</span><strong>{{ gb(value) }} <small>GB</small></strong><small>{{ t('expiry') }} {{ date(plan.expires) }}</small></section>{% endfor %}{% endif %}</div>
-{% if plan %}<section class="panel"><div class="heading"><h2>{{ t('plan') }}</h2><span class="badge good">{{ t('active') }}</span></div><progress max="{{ plan.allowance }}" value="{{ plan.sold+plan.reserved }}"></progress><p class="muted">{{ gb([0,plan.allowance-plan.sold-plan.reserved]|max) }} GB {{ t('remaining') }} / {{ gb(plan.allowance) }} GB {{ t('total_granted') }}</p></section>{% endif %}{% if user.role=='admin' %}<section class="panel"><h2>3X-UI</h2><p>{{ t('connected') }}: {{ date(connection.value|int) if connection else t('unknown') }}</p><a href="/inbounds">{{ t('inbounds') }} →</a></section>{% endif %}<section class="panel"><h2>{{ t('audit') }}</h2>{% include '_audit.html' %}</section>{% if user.role=='reseller' %}<section class="panel"><h2>{{ t('history') }}</h2><div class="table-wrap"><table><thead><tr><th>{{ t('plan') }}</th><th>{{ t('granted') }}</th><th>{{ t('sold') }}</th><th>{{ t('reserved') }}</th><th>{{ t('expiry') }}</th><th>{{ t('status') }}</th></tr></thead><tbody>{% for g in history %}<tr><td>{{ number(g.id) }}</td><td>{{ gb(g.allowance) }} GB</td><td>{{ gb(g.sold) }} GB</td><td>{{ gb(g.reserved) }} GB</td><td>{{ date(g.expires) }}</td><td>{{ t('expired' if g.closed or g.expires<=now else 'active') }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('dashboard') }}{% endblock %}
+{% block heading %}{{ t('dashboard') }}{% endblock %}
+{% block body %}
+{% if user.role=='admin' %}
+<div class="page-head">
+  <div><h1>Hello, {{ user.username }}</h1><p class="muted">Here is what is happening across your resellers.</p></div>
+  <div class="actions-row"><a class="btn btn-primary" href="/resellers/new">{{ ui.icon('plus') }}<span>{{ t('new_reseller') }}</span></a></div>
+</div>
+<div class="stats">
+  <a class="stat" href="/resellers"><span class="stat-icon tone-info">{{ ui.icon('resellers') }}</span><div><small>{{ t('total_resellers') }}</small><b>{{ number(stats.resellers) }}</b></div></a>
+  <a class="stat" href="/customers"><span class="stat-icon tone-primary">{{ ui.icon('customers') }}</span><div><small>{{ t('total_customers') }}</small><b>{{ number(stats.customers) }}</b></div></a>
+  <a class="stat" href="/customers?view=online"><span class="stat-icon tone-success">{{ ui.icon('wifi') }}</span><div><small>{{ t('online_now') }}</small><b>{{ number(stats.online) }}</b></div></a>
+  <a class="stat {{ 'stat-alert' if stats.attention }}" href="/attention"><span class="stat-icon tone-{{ 'danger' if stats.attention else 'muted' }}">{{ ui.icon('alert') }}</span><div><small>{{ t('attention_count') }}</small><b>{{ number(stats.attention) }}</b></div></a>
+</div>
+<div class="grid-main">
+  <section class="card">
+    <header class="card-head"><h2>{{ t('resellers') }}</h2><a class="link-sm" href="/resellers">{{ t('see_all') }} →</a></header>
+    {% if top %}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>{{ t('reseller') }}</th><th>{{ t('plan') }}</th><th class="num">{{ t('customers') }}</th></tr></thead>
+      <tbody>{% for r in top %}<tr>
+        <td data-label="{{ t('reseller') }}"><a class="strong-link" href="/resellers/{{ r.id }}">{{ r.username }}</a>{% if r.suspended %} {{ ui.tag('suspended','danger') }}{% elif not r.allowance %} {{ ui.tag('expired_plan','warning') }}{% endif %}</td>
+        <td data-label="{{ t('plan') }}">{% if r.allowance %}<div class="bar-label"><span>{{ gb(r.sold+r.reserved) }} / {{ gb(r.allowance) }} GB</span><small class="muted">{{ expiry_text(r.expires*1000) }}</small></div>{{ ui.progress(r.sold+r.reserved, r.allowance) }}{% else %}<span class="muted">{{ t('no_plan') }}</span>{% endif %}</td>
+        <td data-label="{{ t('customers') }}" class="num">{{ number(r.customers) }}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}{{ ui.empty('resellers', t('no_resellers'), '/resellers/new', t('new_reseller')) }}{% endif %}
+  </section>
+  <section class="card">
+    <header class="card-head"><h2>{{ t('connection') }}</h2></header>
+    <dl class="kv">
+      <div><dt>{{ t('status') }}</dt><dd>{% if sync.failing %}{{ ui.tag('sync_failing','danger') }}{% elif sync.ok %}<span class="tag tag-success">Connected</span>{% else %}{{ ui.tag('sync_waiting','warning') }}{% endif %}</dd></div>
+      <div><dt>{{ t('last_sync') }}</dt><dd title="{{ date(sync.ok) }}">{{ sync.ago or t('never') }}</dd></div>
+      <div><dt>{{ t('inbounds') }}</dt><dd><a href="/inbounds">{{ number(inbound_count) }}</a></dd></div>
+      <div><dt>{{ t('total_granted') }}</dt><dd>{{ gb(totals.granted) }} GB</dd></div>
+      <div><dt>{{ t('total_sold') }}</dt><dd>{{ gb(totals.sold) }} GB</dd></div>
+    </dl>
+  </section>
+</div>
+<section class="card">
+  <header class="card-head"><h2>{{ t('recent_activity') }}</h2><a class="link-sm" href="/activity">{{ t('see_all') }} →</a></header>
+  {{ ui.feed_list(feed) }}
+</section>
+{% else %}
+<div class="page-head">
+  <div><h1>Hello, {{ user.username }}</h1><p class="muted">{{ t('quota_hint') }}</p></div>
+  {% if plan %}<div class="actions-row"><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
+</div>
+{% if plan %}
+{%- set left = [0, plan.allowance-plan.sold-plan.reserved]|max -%}
+<section class="card plan-card">
+  <div class="plan-top">
+    <div><small class="muted">{{ t('plan_left') }}</small><div class="plan-big">{{ gb(left) }} <span>GB</span></div></div>
+    <div class="plan-expiry">{{ ui.icon('calendar') }}<div><small class="muted">{{ t('plan_expires') }}</small><b>{{ date(plan.expires) }}</b><small>{{ expiry_text(plan.expires*1000) }}</small></div></div>
+  </div>
+  <div class="stack-bar" role="img" aria-label="{{ gb(plan.sold) }} GB sold, {{ gb(plan.reserved) }} GB on hold, {{ gb(left) }} GB left of {{ gb(plan.allowance) }} GB">
+    {%- set sold_pct = (plan.sold*100/plan.allowance)|round(0,'ceil')|int -%}{%- set hold_pct = (plan.reserved*100/plan.allowance)|round(0,'ceil')|int -%}
+    <span class="seg seg-sold w-{{ ((sold_pct/5)|round(0,'ceil')|int)*5 }}"></span><span class="seg seg-hold w-{{ ((hold_pct/5)|round(0,'ceil')|int)*5 }}"></span>
+  </div>
+  <div class="legend">
+    <span><i class="dot-sold"></i>{{ t('plan_used') }} <b>{{ gb(plan.sold) }} GB</b></span>
+    <span><i class="dot-hold"></i>{{ t('plan_hold') }} <b>{{ gb(plan.reserved) }} GB</b></span>
+    <span><i class="dot-left"></i>{{ t('plan_left') }} <b>{{ gb(left) }} GB</b></span>
+    <span class="muted">{{ t('plan_total') }} {{ gb(plan.allowance) }} GB</span>
+  </div>
+</section>
+{% else %}
+{{ ui.alert('warning', t('plan_expired'), false, t('no_plan')+'.') }}
+{% endif %}
+<div class="stats">
+  <a class="stat" href="/customers"><span class="stat-icon tone-primary">{{ ui.icon('customers') }}</span><div><small>{{ t('total_customers') }}</small><b>{{ number(counts.n) }}</b></div></a>
+  <a class="stat" href="/customers?view=active"><span class="stat-icon tone-info">{{ ui.icon('check') }}</span><div><small>{{ t('customers_enabled') }}</small><b>{{ number(counts.enabled) }}</b></div></a>
+  <a class="stat" href="/customers?view=online"><span class="stat-icon tone-success">{{ ui.icon('wifi') }}</span><div><small>{{ t('online_now') }}</small><b>{{ number(counts.online) }}</b></div></a>
+  <a class="stat {{ 'stat-alert' if counts.attention }}" href="/customers?view=attention"><span class="stat-icon tone-{{ 'danger' if counts.attention else 'muted' }}">{{ ui.icon('alert') }}</span><div><small>{{ t('attention_count') }}</small><b>{{ number(counts.attention) }}</b></div></a>
+</div>
+<div class="grid-2">
+  <section class="card">
+    <header class="card-head"><h2>{{ t('recent_activity') }}</h2><a class="link-sm" href="/activity">{{ t('see_all') }} →</a></header>
+    {{ ui.feed_list(feed) }}
+  </section>
+  <section class="card">
+    <header class="card-head"><h2>{{ t('ledger') }}</h2></header>
+    {% if movements %}
+    <ul class="moves">{% for m in movements %}
+      <li><span class="tag tag-{{ m.tone }}">{{ m.label }}</span><span class="moves-what">{% if m.customer %}<a href="/customers/{{ m.customer_id }}">{{ display_name(m.customer) }}</a>{% endif %}</span><b class="moves-amount">{{ m.amount }}</b><time class="muted" title="{{ date(m.created) }}">{{ rel(m.created) }}</time></li>
+    {% endfor %}</ul>
+    {% else %}<div class="empty small">{{ ui.icon('data') }}<p>{{ t('empty') }}</p></div>{% endif %}
+  </section>
+</div>
+{% endif %}
+{% endblock %}

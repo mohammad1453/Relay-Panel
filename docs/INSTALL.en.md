@@ -17,18 +17,24 @@ For a differently named or containerized panel inspect the corresponding service
 
 ## Transfer and install
 
-There is no published Git repository or release URL yet. Upload the supplied project directory with your SSH/SFTP client to `~/relay-source`. Exclude `.venv`, `.reference`, `.env`, `state` and backups. Alternatively create a verified release archive with `python tools/package_release.py` on your development machine and transfer that archive plus its hash via a trusted channel.
+The quickest way is the online installer. It downloads the latest release from [GitHub Releases](https://github.com/mohammad1453/Relay-Panel/releases), checks its SHA-256 and runs `install.sh`. Every option of `install.sh` can be added at the end. Add `--version vX.Y.Z` for a specific release.
 
 ```bash
-mkdir -p ~/relay-source
-# After uploading relay-release.tar.gz and its .sha256 file to your home directory:
-cd ~
-sha256sum -c relay-release.tar.gz.sha256
-tar -xzf relay-release.tar.gz -C ~/relay-source
+bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
+```
+
+To install by hand instead, download `relay-panel-vX.Y.Z.tar.gz` and its `.sha256` from the release page (or build them with `python tools/package_release.py`):
+
+```bash
+mkdir -p ~/relay-source && cd ~
+sha256sum -c relay-panel-vX.Y.Z.tar.gz.sha256
+tar -xzf relay-panel-vX.Y.Z.tar.gz -C ~/relay-source
 cd ~/relay-source
 sudo bash ./install.sh --dry-run
 sudo bash ./install.sh
 ```
+
+**3X-UI on the same VPS:** enter its address the way you open it in the browser. If that is the public IP of this VPS with plain `http://`, the installer switches to `http://127.0.0.1:PORT/WEB-PATH/` (same port and web path) and stores the public host as `XUI_LINK_HOST`, so customer links keep showing it. Plain HTTP to 3X-UI is only allowed on 127.0.0.1; a 3X-UI on another server needs its `https://` address.
 
 The installer checks OS/architecture/systemd, existing services, conventional panel paths, listeners, application path ownership and space. It asks for the HTTPS application origin, master URL, original DB paths and master credentials before making installation changes. Passwords are hidden and never command-line arguments. It installs Python venv support, creates `xui-reseller`, installs the application, initializes its DB and prompts for the initial administrator username/password. Remember that password; it is not logged or saved in plaintext. First login requires changing it.
 
@@ -84,11 +90,11 @@ sudo bash ./install.sh --origin https://reseller.example.com \
   --tls-key /etc/letsencrypt/live/reseller.example.com/privkey.pem
 ```
 
-Replace the example domain and paths. The tool checks DNS resolution, certificate hostname/expiry, conflicts, creates `/etc/nginx/conf.d/3xui-reseller.conf`, runs `nginx -t`, and reloads only after validation. It never replaces existing certificates or sites. Automatic ACME issuance and installing a competing proxy are intentionally not supported; obtain the certificate using your existing TLS management process. For Caddy/Apache or an already completed installation, add a dedicated HTTPS vhost manually forwarding to `127.0.0.1:8095`, preserve Host, set 64 KiB body limit and 120-second upstream timeout. Do not expose the internal port or change firewall rules for it.
+Replace the example domain and paths. The tool checks DNS resolution, certificate hostname/expiry, conflicts, creates `/etc/nginx/conf.d/3xui-reseller.conf`, runs `nginx -t`, and reloads only after validation. It never replaces existing certificates or sites. Automatic ACME issuance and installing a competing proxy are intentionally not supported; obtain the certificate using your existing TLS management process. For Caddy/Apache or an already completed installation, add a dedicated HTTPS vhost manually forwarding to `127.0.0.1:8095`, preserve Host, set `X-Forwarded-For` to the client address (overwrite it, do not append), set 64 KiB body limit and 120-second upstream timeout. Without the forwarded address every visitor shares one login rate-limit bucket. If you installed an earlier release with `--domain`, add `proxy_set_header X-Forwarded-For $remote_addr;` to `/etc/nginx/conf.d/3xui-reseller.conf` yourself and reload Nginx; the installer will not overwrite an existing site file. Do not expose the internal port or change firewall rules for it.
 
 ## First use
 
-1. Log in and change the initial password. Switch English/Persian in the sidebar.
+1. Log in and change the initial password.
 2. Open **Inbounds → Refresh from master**. Check names, IDs, protocol, ports and availability.
 3. Create a reseller with unique username/tag, password, GB grant, expiration and explicitly permitted inbounds.
 4. Sign in as that reseller and change its password.
@@ -127,10 +133,16 @@ sudo -u xui-reseller .venv/bin/python -m reseller.manage unlock-restored --env /
 
 ## Updates and rollback
 
-Build a source release archive on the development machine using `python tools/package_release.py`. Transfer it safely; compare its printed SHA-256 against a trusted independently obtained value.
+Run the online installer again; on an installed system it updates to the latest release (or the one given with `--version`):
 
 ```bash
-sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-release.tar.gz --sha256 REPLACE_WITH_TRUSTED_64_HEX_SHA256
+bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
+```
+
+Or update from a release archive you downloaded or built with `python tools/package_release.py`:
+
+```bash
+sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-panel-vX.Y.Z.tar.gz --sha256 SHA256_FROM_THE_RELEASE_PAGE
 ```
 
 The updater validates archive traversal and checksum, backs up DB/config, stops only Relay, installs code/dependencies, migrates and health-checks. On failure it restores prior code and DB/config automatically and restarts Relay. A restored DB is sales-locked pending operator review. Keep the previous release archive and pre-update backup for manual recovery: reinstall the old release into the dedicated code directory, restore its compatible backup, check health/reconcile, then unlock. Never run an older application against a newer schema.
@@ -151,7 +163,7 @@ This lists the exact paths and requires typing `PURGE 3XUI-RESELLER`. Save neede
 
 ## Troubleshooting and isolation verification
 
-Port conflict: choose a free `--port`; never stop the occupying service automatically. API 401/403: verify admin token scope or credentials. Wrong path/HTML: include the actual master web base path. TLS error: correct certificate/trust; TLS verification cannot be disabled. Pending operation: inspect **Operations & audit**, reconcile first, and use guarded admin repair only for a verified existing identity. A lost response with an absent client deliberately stays reserved.
+Port conflict: choose a free `--port`; never stop the occupying service automatically. API 401/403: verify admin token scope or credentials. Wrong path/HTML: include the actual master web base path. TLS error: correct certificate/trust; TLS verification cannot be disabled. Pending operation or changed customer: open **Needs attention**. Each item explains the problem and offers the safe actions (Check again, Send again, Mark as done, Accept 3X-UI values, Remove customer). A sent change whose client stays missing from 3X-UI for 3 syncs is cancelled automatically and its held data returned.
 
 Compare original panel service status/start time, unit-file hash and protected configuration hashes before/after installation. Do not expect a live panel database file hash to remain constant while traffic is being recorded.
 
