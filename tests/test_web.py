@@ -273,13 +273,15 @@ def test_subscription_link_uses_configured_url(client,setup):
     assert '1mo.us' not in response.text
 
 
-def test_subscription_link_hidden_when_unconfigured(setup):
+def test_subscription_link_explains_when_3xui_subscription_is_off(setup,monkeypatch):
     config,_,_,service,_,actor,_=setup
     op=sale(service,actor)
+    monkeypatch.setattr(service.remote,'subscription_base',lambda:'')
     with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
         login(c)
         response=c.get('/customers/'+str(op['customer_id'])+'/links')
-        assert response.status_code==200 and 'Subscription link' not in response.text
+        assert response.status_code==200 and 'subscription service is off in 3X-UI' in response.text
+        assert 'id="subscription-link"' not in response.text
 
 
 def test_unknown_message_is_not_rendered(client):
@@ -367,3 +369,55 @@ def test_dashboard_shows_detected_3xui(client,setup):
     login(client,'admin')
     page=client.get('/').text
     assert 'client API' in page and 'Relay needs 3X-UI version' not in page
+
+
+def test_link_titles_use_inbound_and_customer_name(setup):
+    from reseller.links import label_links
+    import base64 as b64
+    inbounds=[{'id':1,'name':'VLESS WS','protocol':'vless','port':443,'metadata':json.dumps({'streamSettings':{'network':'ws','wsSettings':{'path':'/ws'}}})},
+              {'id':2,'name':'VLESS TCP','protocol':'vless','port':8443,'metadata':json.dumps({'streamSettings':{'network':'tcp'}})},
+              {'id':3,'name':'VMess gRPC','protocol':'vmess','port':2053,'metadata':json.dumps({'streamSettings':{'network':'grpc','grpcSettings':{'serviceName':'svc'}}})}]
+    vmess='vmess://'+b64.b64encode(json.dumps({'add':'cdn.example','port':'443','net':'grpc','path':'svc','ps':'x'}).encode()).decode()
+    uris=['vless://u@1.2.3.4:443?type=ws&path=%2Fws#%F0%9F%87%A9%F0%9F%87%AA%20DE-ali',
+          'vless://u@104.21.21.111:443?type=ws&path=%2Fws#cdn-ali',
+          'vless://u@1.2.3.4:8443?type=tcp#tcp-ali', vmess]
+    items=label_links(uris,inbounds,'ali')
+    assert [i['title'] for i in items]==['VLESS WS (1) · ali','VLESS WS (2) · ali','VLESS TCP · ali','VMess gRPC · ali']
+    assert items[1]['server']=='104.21.21.111:443' and items[0]['remark'].endswith('DE-ali')
+
+
+def test_links_page_titles_and_subscription_from_3xui(setup):
+    config,_,_,service,_,actor,_=setup
+    op=sale(service,actor,email='titled')
+    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
+        login(c)
+        page=c.get('/customers/'+str(op['customer_id'])+'/links').text
+        sub_id=setup[2].one('SELECT sub_id FROM customers WHERE id=?',(op['customer_id'],))['sub_id']
+        assert 'https://panel-sub.invalid:2096/sub/'+sub_id in page
+        assert 'Inbound 1 · titled' in page
+        assert page.index('Subscription link')<page.index('Single configs')
+
+
+def test_admin_creates_customer_from_the_web(client,setup):
+    _,panel,db,_,_,_,_=setup
+    token=login(client,'admin')
+    page=client.get('/customers/new')
+    assert page.status_code==200 and 'RelayPanel' in page.text and 'Inbound 11' not in page.text
+    response=client.post('/customers/new',data={'csrf':token,'operation_id':str(uuid.uuid4()),'email':'by-admin','volume':'2000','first_use':'on','days':'30','enable':'on','inbounds':'1'},follow_redirects=False)
+    assert response.status_code==303 and 'customer_created' in response.headers['location'],response.text
+    assert panel.rows['by-admin']['group']=='RelayPanel'
+    detail=client.get(response.headers['location']).text
+    assert '/customers/'+str(db.one("SELECT id FROM customers WHERE email='by-admin'")['id'])+'/edit' in detail
+
+
+def test_loopback_subscription_address_uses_public_host(setup,monkeypatch):
+    config,_,_,service,_,actor,_=setup
+    op=sale(service,actor,email='public-sub')
+    monkeypatch.setattr(service.remote,'subscription_base',lambda:'http://127.0.0.1:2096/subpath/')
+    cfg=replace(config,sub_url='',origin='http://203.0.113.7:8095',base_path='/relay',public_http=True,xui_database_paths='/etc/x-ui/x-ui.db')
+    with TestClient(create_app(cfg,service.remote,background=False),base_url=cfg.origin) as c:
+        page=c.get('/relay/login')
+        token=re.search(r'name="csrf" value="([^"]+)"',page.text).group(1)
+        c.post('/relay/login',data={'csrf':token,'username':'reseller','password':'A-long-test-password!'})
+        text=c.get('/relay/customers/'+str(op['customer_id'])+'/links').text
+        assert 'http://203.0.113.7:2096/subpath/' in text and '127.0.0.1:2096' not in text

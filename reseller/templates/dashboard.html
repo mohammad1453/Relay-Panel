@@ -5,7 +5,7 @@
 {% if user.role=='admin' %}
 <div class="page-head">
   <div><h1>Hello, {{ user.username }}</h1><p class="muted">Here is what is happening across your resellers.</p></div>
-  <div class="actions-row"><a class="btn btn-primary" href="/resellers/new">{{ ui.icon('plus') }}<span>{{ t('new_reseller') }}</span></a></div>
+  <div class="actions-row"><a class="btn btn-ghost" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a><a class="btn btn-primary" href="/resellers/new">{{ ui.icon('plus') }}<span>{{ t('new_reseller') }}</span></a></div>
 </div>
 <div class="stats">
   <a class="stat" href="/resellers"><span class="stat-icon tone-info">{{ ui.icon('resellers') }}</span><div><small>{{ t('total_resellers') }}</small><b>{{ number(stats.resellers) }}</b></div></a>

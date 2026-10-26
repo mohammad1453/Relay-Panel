@@ -15,6 +15,8 @@ GIB = 1024**3
 from .domain_constants import PROTOCOLS  # noqa: E402  (re-exported for templates and tests)
 # Issues that mean the 3X-UI copy of a customer no longer matches Relay.
 DRIFT_ISSUES = ('remote_changed', 'remote_identity', 'remote_drift')
+# 3X-UI client group for customers the admin creates directly (they have no reseller plan).
+ADMIN_GROUP = 'RelayPanel'
 # A sent create/update whose client is missing on this many full syncs is treated as gone.
 ABSENT_SYNCS = 3
 
@@ -98,6 +100,8 @@ class Service:
         if actor['role'] != 'admin':
             raise RuleError('forbidden', 403)
         tag = identifier(tag)
+        if tag == ADMIN_GROUP.lower():
+            raise RuleError('identity_conflict')
         with self.db.transaction() as db:
             ids = self._valid_inbounds(db, inbound_ids)
             try:
@@ -280,13 +284,15 @@ class Service:
                 return dict(previous)
             customer = owned(db, actor, customer_id) if customer_id else None
             uid = customer['user_id'] if customer else actor['id']
-            if not customer and actor['role'] != 'reseller':
-                raise RuleError('forbidden',403)
             owner = db.execute('SELECT * FROM users WHERE id=?',(uid,)).fetchone()
+            # Customers the admin creates belong to the admin: no plan, no quota, all inbounds.
+            admin_owned = owner['role'] == 'admin'
             # An admin must be able to remove customers of an expired or suspended
             # reseller. A delete charges nothing, so it needs no active plan.
             admin_delete = kind == 'delete' and actor['role'] == 'admin'
-            if admin_delete:
+            if admin_owned:
+                grant = None
+            elif admin_delete:
                 grant = db.execute('SELECT * FROM grants WHERE user_id=? ORDER BY id DESC LIMIT 1',(uid,)).fetchone()
                 if not grant:
                     raise RuleError('plan_expired',403)
@@ -313,7 +319,7 @@ class Service:
                 previous_ids = []
                 payload = {}
             for iid in ids:
-                if not admin_delete and not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(uid,iid)).fetchone():
+                if not admin_delete and not admin_owned and not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(uid,iid)).fetchone():
                     raise RuleError('inbound_denied',403)
             if kind != 'delete':
                 self._valid_inbounds(db, ids)
@@ -350,12 +356,12 @@ class Service:
                 if len(comment) > 1000:
                     raise RuleError('invalid_input')
                 payload.update(totalGB=amount, expiryTime=expiry, comment=comment,
-                               enable=bool(form.get('enable',payload.get('enable',True))),group=owner['tag'],
+                               enable=bool(form.get('enable',payload.get('enable',True))),group=ADMIN_GROUP if admin_owned else owner['tag'],
                                reset=0,resetDay=0,resetMax=0,trafficReset='never',trafficResetDay=1)
-                charge = max(0,amount - (customer['package'] if customer else 0))
+                charge = 0 if admin_owned else max(0,amount - (customer['package'] if customer else 0))
             else:
                 amount, charge = customer['package'], 0
-            if grant['sold']+grant['reserved']+charge > grant['allowance']:
+            if grant and grant['sold']+grant['reserved']+charge > grant['allowance']:
                 raise RuleError('insufficient_quota')
             if not customer:
                 try:
@@ -379,14 +385,17 @@ class Service:
                     raise RuleError('identity_conflict')
                 db.execute('INSERT OR IGNORE INTO identities VALUES(?,?,?)',(field,fingerprint,customer_id))
             db.execute("INSERT INTO operations(id,actor,customer_id,grant_id,kind,charge,request_hash,desired,status,created,updated) VALUES(?,?,?,?,?,?,?,?,'reserved',?,?)",
-                       (operation_id,actor['id'],customer_id,grant['id'],kind,charge,request_hash,desired,now(),now()))
-            db.execute('UPDATE grants SET reserved=reserved+? WHERE id=?',(charge,grant['id']))
-            self._entry(db, uid, grant['id'], customer_id, operation_id,'reserve',charge,actor['id'])
+                       (operation_id,actor['id'],customer_id,grant['id'] if grant else None,kind,charge,request_hash,desired,now(),now()))
+            if grant:
+                db.execute('UPDATE grants SET reserved=reserved+? WHERE id=?',(charge,grant['id']))
+                self._entry(db, uid, grant['id'], customer_id, operation_id,'reserve',charge,actor['id'])
             audit(db,actor['id'], 'customer_'+kind+'_reserved',customer_id)
             return dict(db.execute('SELECT * FROM operations WHERE id=?',(operation_id,)).fetchone())
 
     @staticmethod
     def _entry(db,uid,gid,cid,oid,kind,amount,actor):
+        if gid is None:
+            return  # admin-owned customers have no plan, so nothing to book
         db.execute('INSERT INTO ledger(user_id,grant_id,customer_id,operation_id,kind,amount,actor,created) VALUES(?,?,?,?,?,?,?,?)', (uid,gid,cid,oid,kind,amount,actor,now()))
 
     def _identity(self, local, remote):
@@ -458,7 +467,8 @@ class Service:
             permitted=all(db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(local['user_id'],iid)).fetchone() for iid in desired['inboundIds'])
             actor_row=db.execute('SELECT role FROM users WHERE id=?',(op['actor'],)).fetchone()
             admin_delete=op['kind']=='delete' and actor_row and actor_row['role']=='admin'
-            can_send=bool(original and owner) and (admin_delete or not owner['suspended'] and not original['closed'] and original['expires']>now() and permitted)
+            admin_owned=op['grant_id'] is None
+            can_send=bool(owner) and (admin_owned or admin_delete or bool(original) and not owner['suspended'] and not original['closed'] and original['expires']>now() and permitted)
             if can_send and op['kind']=='update':
                 desired['refund'] = self._refund_amount(db,local['user_id'],op['grant_id'],local['id'],
                                                         local['package'],desired['client']['totalGB'],used_bytes)
@@ -588,7 +598,7 @@ class Service:
                     return
                 refund = int(desired.get('refund',0)) if op['kind']=='update' else 0
                 changed = db.execute('UPDATE grants SET reserved=reserved-?,sold=sold+?-? WHERE id=? AND sold>=?',
-                                     (op['charge'],op['charge'],refund,op['grant_id'],refund)).rowcount
+                                     (op['charge'],op['charge'],refund,op['grant_id'],refund)).rowcount if op['grant_id'] is not None else 1
                 if changed != 1:
                     db.execute("UPDATE operations SET status='uncertain',diagnostic='reconcile_required',updated=? WHERE id=?",(now(),oid))
                     return
@@ -827,20 +837,22 @@ class Service:
                 raise RuleError('forbidden',403)
             if old['status']!='failed' or old['kind']!='create' or local['status']!='failed':
                 raise RuleError('reconcile_required',409)
-            grant=active_grant(db,local['user_id'])
+            admin_owned=owner['role']=='admin'
+            grant=None if admin_owned else active_grant(db,local['user_id'])
             desired=json.loads(old['desired'])
             ids=self._valid_inbounds(db,desired['inboundIds'])
-            if any(not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(local['user_id'],iid)).fetchone() for iid in ids):
+            if not admin_owned and any(not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?',(local['user_id'],iid)).fetchone() for iid in ids):
                 raise RuleError('inbound_denied',403)
             expiry=desired['client']['expiryTime']
             if expiry>0 and expiry<=now()*1000:
                 raise RuleError('invalid_expiry')
-            charge=desired['client']['totalGB']
-            if grant['sold']+grant['reserved']+charge>grant['allowance']:
+            charge=0 if admin_owned else desired['client']['totalGB']
+            if grant and grant['sold']+grant['reserved']+charge>grant['allowance']:
                 raise RuleError('insufficient_quota')
-            db.execute("INSERT INTO operations(id,actor,customer_id,grant_id,kind,charge,request_hash,desired,status,created,updated) VALUES(?,?,?,?,'create',?,?,?,'reserved',?,?)",(new_id,actor['id'],local['id'],grant['id'],charge,fingerprint,old['desired'],now(),now()))
-            db.execute('UPDATE grants SET reserved=reserved+? WHERE id=?',(charge,grant['id']))
-            self._entry(db,local['user_id'],grant['id'],local['id'],new_id,'reserve',charge,actor['id'])
+            gid=grant['id'] if grant else None
+            db.execute("INSERT INTO operations(id,actor,customer_id,grant_id,kind,charge,request_hash,desired,status,created,updated) VALUES(?,?,?,?,'create',?,?,?,'reserved',?,?)",(new_id,actor['id'],local['id'],gid,charge,fingerprint,old['desired'],now(),now()))
+            db.execute('UPDATE grants SET reserved=reserved+? WHERE id=?',(charge,gid))
+            self._entry(db,local['user_id'],gid,local['id'],new_id,'reserve',charge,actor['id'])
             db.execute("UPDATE customers SET status='pending',issue='' WHERE id=?",(local['id'],))
             audit(db,actor['id'],'retry_unsent',local['id'])
             return dict(db.execute('SELECT * FROM operations WHERE id=?',(new_id,)).fetchone())

@@ -49,6 +49,7 @@ MESSAGES = {
     'uuid': 'UUID', 'sub_id': 'Subscription ID', 'credential': 'Password', 'keep_credential': 'Leave empty to keep the current value.',
     'links': 'Connection links', 'subscription_link': 'Subscription link',
     'subscription_hint': 'Give this link to the customer. Their app keeps itself up to date with it.',
+    'no_subscription': 'No subscription link: the subscription service is off in 3X-UI. Turn it on in 3X-UI settings, or set XUI_SUB_URL in Relay.',
     'config_uris': 'Single configs', 'config_hint': 'One link per inbound. Use these if the app has no subscription support.',
     'no_links': 'No connection links yet. They appear after 3X-UI confirms the customer.',
     'enable_customer': 'Customer can connect', 'last_update': 'Last update', 'online_status': 'Connection',

@@ -136,6 +136,7 @@
   const volume = $('#customer-volume');
   function summary() {
     if (!volume) return;
+    if (volume.dataset.quotaGb === '') return;  // admin customers have no plan limit
     const quota = Number(volume.dataset.quotaGb || 0);
     const current = Number(volume.dataset.currentGb || 0);
     const amount = Number(volume.value);

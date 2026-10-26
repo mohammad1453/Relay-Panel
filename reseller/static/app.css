@@ -410,6 +410,8 @@ input[type="checkbox"] { width: auto; min-height: 0; accent-color: var(--primary
 .copy-block { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .copy-block:last-child { border-bottom: 0; padding-bottom: 0; }
 .copy-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.copy-name { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.sub-card { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
 .copy-block textarea { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 0; color: var(--text-2); word-break: break-all; }
 .btn.copied { border-color: var(--success); color: var(--success); }
 

@@ -18,6 +18,13 @@ to schema 3 automatically.
   classic inbound API on 2.x and 3.0 (one inbound per customer there). Tested
   against real v2.9.4, v3.0.2, v3.1.0 and v3.11.0 panels. The dashboard and
   `status.sh` show the detected version and mode.
+- The admin can create customers directly. They have no plan limit, can use
+  every inbound, and appear in 3X-UI with the group `RelayPanel`.
+- Connection links are titled "inbound name · customer name" (with the
+  server address underneath) instead of the raw encoded remark, and the
+  subscription link is always shown first. Without `XUI_SUB_URL`, Relay uses
+  the subscription address configured in 3X-UI, with the public host instead
+  of 127.0.0.1.
 - One-line online installer and updater (`install-online.sh`) that downloads a
   published GitHub release and checks its SHA-256.
 - Version number shown in the panel, `/healthz` and `status.sh`; GitHub Actions
