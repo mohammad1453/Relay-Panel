@@ -19,17 +19,12 @@ release archive name and the online installer all read it.
    update the links at the bottom.
 3. Write the same number in `VERSION`.
 4. Run the tests: `python -m pytest -q`.
-5. Merge to `main`, then tag that commit and push the tag:
-
-   ```bash
-   git checkout main && git pull
-   git tag -a vX.Y.Z -m "Relay vX.Y.Z"
-   git push origin vX.Y.Z
-   ```
-
-6. The **Release** GitHub Action checks that the tag matches `VERSION`, runs
-   the tests, builds `relay-panel-vX.Y.Z.tar.gz` with its `.sha256`, and
-   publishes a GitHub release with the notes from the changelog.
+5. Merge to `main`. Because `VERSION` changed, the **Release** GitHub Action
+   runs by itself: it runs the tests, builds `relay-panel-vX.Y.Z.tar.gz` with
+   its `.sha256`, creates the `vX.Y.Z` tag and publishes a GitHub release with
+   the notes from the changelog. You can also start it from the Actions tab
+   (Release → Run workflow), or push a `vX.Y.Z` tag yourself; it does nothing
+   if that release already exists.
 
 From then on the online installer installs or updates to the new version:
 

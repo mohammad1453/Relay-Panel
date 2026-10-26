@@ -1,53 +1,83 @@
 name: Release
 
-# Push a tag like v1.0.0 (matching the VERSION file) to publish a release.
+# A release is published when the VERSION file on main has a version that has
+# no GitHub release yet. GitHub creates the vX.Y.Z tag itself. Pushing a
+# vX.Y.Z tag by hand, or running this workflow from the Actions tab, also works.
 on:
   push:
+    branches: [main]
+    paths: [VERSION]
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Work out the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(cat VERSION)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$tag" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match VERSION $(cat VERSION)"; exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.version.outputs.skip != 'true'
         with:
           python-version: "3.12"
-      - name: Tag must match VERSION
-        run: |
-          test "${GITHUB_REF_NAME}" = "v$(cat VERSION)" || { echo "Tag ${GITHUB_REF_NAME} does not match VERSION $(cat VERSION)"; exit 1; }
       - name: Install dependencies
+        if: steps.version.outputs.skip != 'true'
         run: pip install -r requirements-dev.txt -c requirements.lock
       - name: Run tests
+        if: steps.version.outputs.skip != 'true'
         run: python -m pytest -q
       - name: Build release archive
+        if: steps.version.outputs.skip != 'true'
         run: python tools/package_release.py
       - name: Release notes from CHANGELOG
+        if: steps.version.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          version="$(cat VERSION)"
+          version="${TAG#v}"
           awk -v v="$version" '
             $0 ~ "^## \\[" v "\\]" {on=1; next}
             on && /^## \[/ {exit}
             on {print}
           ' CHANGELOG.md > notes.md
-          cat >> notes.md <<NOTES
-
-          ## Install or update
-
-          \`\`\`bash
-          bash <(curl -Ls https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install-online.sh) --version ${GITHUB_REF_NAME}
-          \`\`\`
-
-          SHA-256 of \`relay-panel-${GITHUB_REF_NAME}.tar.gz\`: \`$(cut -d' ' -f1 dist/relay-panel-${GITHUB_REF_NAME}.tar.gz.sha256)\`
-          NOTES
+          sum="$(cut -d' ' -f1 "dist/relay-panel-${TAG}.tar.gz.sha256")"
+          {
+            echo
+            echo "## Install or update"
+            echo
+            echo '```bash'
+            echo "bash <(curl -Ls https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install-online.sh) --version ${TAG}"
+            echo '```'
+            echo
+            echo "SHA-256 of \`relay-panel-${TAG}.tar.gz\`: \`${sum}\`"
+          } >> notes.md
       - name: Publish GitHub release
+        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            "dist/relay-panel-${GITHUB_REF_NAME}.tar.gz" \
-            "dist/relay-panel-${GITHUB_REF_NAME}.tar.gz.sha256" \
-            --title "Relay ${GITHUB_REF_NAME}" --notes-file notes.md --verify-tag
+          gh release create "$TAG" \
+            "dist/relay-panel-${TAG}.tar.gz" \
+            "dist/relay-panel-${TAG}.tar.gz.sha256" \
+            --target "$GITHUB_SHA" --title "Relay ${TAG}" --notes-file notes.md --latest
