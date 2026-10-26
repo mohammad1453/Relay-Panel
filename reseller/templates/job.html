@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('bulk_title') }}{% endblock %}
+{% block heading %}<a href="/customers" class="crumb">{{ t('customers') }}</a> / {{ t('bulk_title') }}{% endblock %}
+{% block body %}
+<div class="page-head" {% if job.status=='running' %}data-auto-refresh="2500"{% endif %}>
+  <div><h1 class="title-with-tag">{{ job.summary }} {% if job.status=='running' %}{{ ui.tag('bulk_running','warning') }}{% elif job.status=='finished' %}{{ ui.tag('bulk_finished','success') }}{% else %}{{ ui.tag('bulk_interrupted_tag','danger') }}{% endif %}</h1>
+  <p class="muted">{{ t('started') }} {{ rel(job.created) }} · {{ job.actor_name }}</p></div>
+  <div class="actions-row"><a class="btn btn-ghost" href="/customers">{{ ui.icon('left') }}<span>{{ t('customers') }}</span></a></div>
+</div>
+<section class="card stack">
+  <div class="bar-label"><span>{{ finished }} / {{ job.total }}</span><small class="muted">{{ t('bulk_running_hint') if job.status=='running' else '' }}</small></div>
+  {{ ui.progress(finished, job.total, 'bar-primary') }}
+  <div class="stats stats-3">
+    <div class="stat"><span class="stat-icon tone-success">{{ ui.icon('check') }}</span><div><small>{{ t('bulk_done') }}</small><b>{{ job.done }}</b></div></div>
+    <div class="stat"><span class="stat-icon tone-muted">{{ ui.icon('right') }}</span><div><small>{{ t('bulk_skipped') }}</small><b>{{ job.skipped }}</b></div></div>
+    <div class="stat {{ 'stat-alert' if job.failed }}"><span class="stat-icon tone-{{ 'danger' if job.failed else 'muted' }}">{{ ui.icon('alert') }}</span><div><small>{{ t('failed') }}</small><b>{{ job.failed }}</b></div></div>
+  </div>
+</section>
+<section class="card card-flush">
+  <div class="table-wrap"><table class="table table-cards">
+    <thead><tr><th>{{ t('customer') }}</th><th>{{ t('status') }}</th><th>{{ t('bulk_after') }}</th></tr></thead>
+    <tbody>{% for item in items %}<tr>
+      <td data-label="{{ t('customer') }}"><a class="strong-link" href="/customers/{{ item.cid }}">{{ display_name(item.email) }}</a></td>
+      <td data-label="{{ t('status') }}">{% if item.state=='done' %}{{ ui.tag('bulk_done','success') }}{% elif item.state=='failed' %}{{ ui.tag('failed','danger') }}{% elif item.state=='skipped' %}{{ ui.tag('bulk_skipped','muted') }}{% else %}{{ ui.tag('pending','warning') }}{% endif %}{% if item.reason %} <small class="muted">{{ t(item.reason) }}</small>{% endif %}</td>
+      <td data-label="{{ t('bulk_after') }}">{% if item.enable is not none %}{{ ui.tag('enabled','success') if item.enable else ui.tag('disabled','muted') }}{% else %}<div class="tags">{% for i in item.after %}<span class="tag tag-outline">{{ names.get(i, '#'~i) }}</span>{% endfor %}</div>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

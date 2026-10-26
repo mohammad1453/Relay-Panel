@@ -65,8 +65,8 @@ class Panel:
             if path=='clients/add':
                 self.count+=1
                 client=copy.deepcopy(payload['client'])
-                client.setdefault('password','generated')
-                client.setdefault('auth','generated')
+                client.setdefault('password','generated-'+client['email'])
+                client.setdefault('auth','generated-'+client['email'])
                 client.setdefault('publicKey','generated-key')
                 client.setdefault('privateKey','generated-private-key')
                 client.setdefault('secret','ee0123456789abcdef')

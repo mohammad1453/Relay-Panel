@@ -3,6 +3,7 @@ import json
 import logging
 import secrets
 import sqlite3
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -77,12 +78,27 @@ def create_app(config=None, remote=None, background=True):
     remote = remote or XUI(config)
     service = Service(db,remote)
     service.settle_seconds = max(60, config.sync_seconds*2)
+    service.interrupt_jobs()
     templates = Jinja2Templates(directory=str(Path(__file__).with_name('templates')))
     zone = ZoneInfo(config.timezone)
     t = translator()
 
     def set_state(conn, key, value):
         conn.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
+
+    def sub_template():
+        """The subscription address set on the Settings page, else XUI_SUB_URL, else nothing."""
+        row=db.one("SELECT value FROM state WHERE key='setting:sub_url'")
+        return (row['value'] if row else '') or config.sub_url
+
+    def subscription_link_for(sub_id):
+        template=sub_template()
+        if not template or not sub_id:
+            return ''
+        sub_id=quote(display_name(sub_id),safe='')
+        if '{subId}' in template:
+            return template.replace('{subId}',sub_id)
+        return template.rstrip('/')+'/'+sub_id
 
     async def worker():
         # Full sync every SYNC_SECONDS; in between, quick checks of customers being set up.
@@ -202,7 +218,7 @@ def create_app(config=None, remote=None, background=True):
             'error':error if known(error) else ('error' if error else ''),'PROTOCOLS':service.protocols,'base_path':config.base_path,
             'form_data':{},'field_errors':{},'page_error':'','sync':sync_status() if user else None,
             'attention_total':attention_count() if user and user['role']=='admin' else 0,
-            'version':__version__,'quick_volumes':QUICK_VOLUMES,'quick_days':QUICK_DAYS,'link':link,
+            'version':__version__,'subscription_link_for':subscription_link_for,'quick_volumes':QUICK_VOLUMES,'quick_days':QUICK_DAYS,'link':link,
         }
         base.update(context)
         return templates.TemplateResponse(request=request,name=name,context=base,status_code=status)
@@ -369,7 +385,7 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/healthz')
     def health():
         db.one('SELECT 1 AS ok')
-        return {'status':'ok','schema':3,'version':__version__}
+        return {'status':'ok','schema':4,'version':__version__}
 
     # ----- Sign in and account -----------------------------------------------
 
@@ -681,24 +697,30 @@ def create_app(config=None, remote=None, background=True):
         'removed':"c.status='deleted'",
     }
 
-    @app.get('/customers')
-    def customers(request:Request):
-        user=require(request)
-        params=request.query_params
-        q=params.get('q','')[:100]
+    def customer_filter(user,params):
+        """SQL conditions for the customer list filters (also used to pick bulk targets)."""
+        q=str(params.get('q',''))[:100]
         view=params.get('view','') if params.get('view','') in VIEWS else ''
         where=['(c.email LIKE ? OR json_extract(c.payload,\'$.comment\') LIKE ?)']
         args=['%'+q+'%','%'+q+'%']
         if user['role']!='admin':
             where.append('c.user_id=?');args.append(user['id'])
-        elif params.get('owner','').isdigit():
+        elif str(params.get('owner','')).isdigit():
             where.append('c.user_id=?');args.append(int(params['owner']))
         where.append(VIEWS[view].format(ms=now()*1000,online=online_clause()) if view else "c.status!='deleted'")
-        if params.get('inbound','').isdigit():
+        if str(params.get('inbound','')).isdigit():
             where.append('EXISTS(SELECT 1 FROM placements WHERE customer_id=c.id AND inbound_id=?)');args.append(int(params['inbound']))
+        return q,view,' AND '.join(where),args
+
+    @app.get('/customers')
+    def customers(request:Request):
+        user=require(request)
+        params=request.query_params
+        q,view,where,args=customer_filter(user,params)
         sort={'email':'c.email','package':'c.package DESC','created':'c.id DESC','usage':'coalesce(c.used,0) DESC'}.get(params.get('sort'),'c.id DESC')
         page=int_param(request,'page')
-        rows=db.all('SELECT c.*,u.username owner FROM customers c JOIN users u ON c.user_id=u.id WHERE '+' AND '.join(where)+' ORDER BY '+sort+' LIMIT ? OFFSET ?',args+[PAGE,(page-1)*PAGE])
+        total=db.one('SELECT count(*) n FROM customers c WHERE '+where,args)['n']
+        rows=db.all('SELECT c.*,u.username owner FROM customers c JOIN users u ON c.user_id=u.id WHERE '+where+' ORDER BY '+sort+' LIMIT ? OFFSET ?',args+[PAGE,(page-1)*PAGE])
         for c in rows:
             c['p']=json.loads(c['payload'])
             c['inbound_names']=[r['name'] or t('unnamed_inbound') for r in db.all('SELECT i.name FROM placements p JOIN inbounds i ON i.id=p.inbound_id WHERE p.customer_id=?',(c['id'],))]
@@ -710,7 +732,7 @@ def create_app(config=None, remote=None, background=True):
             any_customers=bool(db.one('SELECT 1 x FROM customers LIMIT 1'))
         else:
             any_customers=bool(db.one('SELECT 1 x FROM customers WHERE user_id=? LIMIT 1',(user['id'],)))
-        return render(request,'customers.html',rows=rows,q=q,page=page,view=view,owners=owners,filters=params,any_customers=any_customers,
+        return render(request,'customers.html',rows=rows,q=q,page=page,view=view,owners=owners,filters=params,any_customers=any_customers,total=total,
                       inbounds=allowed(None if user['role']=='admin' else user['id']))
 
     def customer_form_page(request,user,customer=None,status=200,form_data=None,**context):
@@ -864,22 +886,6 @@ def create_app(config=None, remote=None, background=True):
         await run_in_threadpool(service.accept_remote,user,cid)
         return redirect(back(request,f'/customers/{cid}'),'accepted')
 
-    def public_subscription_base(base):
-        """3X-UI builds the address from how Relay reached it; replace a loopback host
-        (Relay talks to 3X-UI on 127.0.0.1) with the public one customers can reach."""
-        try:
-            parts=urlsplit(base)
-        except ValueError:
-            return base
-        if parts.hostname not in ('127.0.0.1','localhost','::1'):
-            return base
-        public=config.link_host or urlsplit(config.origin).hostname
-        if not public or public in ('127.0.0.1','localhost','::1'):
-            return base
-        host=f'[{public}]' if ':' in public else public
-        netloc=host+(f':{parts.port}' if parts.port else '')
-        return parts._replace(netloc=netloc).geturl()
-
     def checked_links(user,cid):
         c=customer_view(user,cid)
         if c['status']!='active':
@@ -905,15 +911,124 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/customers/{cid}/links')
     def links(request:Request,cid:int):
         c,links=checked_links(require(request),cid)
-        # XUI_SUB_URL wins when set; otherwise use the subscription address 3X-UI itself shows.
-        base=config.sub_url.rstrip('/')+'/' if config.sub_url else remote.subscription_base() if hasattr(remote,'subscription_base') else ''
-        if base and not base.endswith('/'):
-            base+='/'
-        base=public_subscription_base(base)
-        subscription_link=base+quote(c['sub_id'],safe='') if base else ''
+        subscription_link=subscription_link_for(c['sub_id'])
         inbounds=db.all('SELECT i.id,i.name,i.protocol,i.port,i.metadata FROM placements p JOIN inbounds i ON i.id=p.inbound_id WHERE p.customer_id=? ORDER BY i.id',(cid,))
         items=label_links(links,inbounds,display_name(c['email']))
         return render(request,'links.html',customer=c,links=items,subscription_link=subscription_link)
+
+    # ----- Bulk inbound changes ---------------------------------------------------
+
+    BULK_FILTERS=('q','view','owner','inbound')
+
+    def bulk_targets(user,source):
+        """Customer ids picked on the list, or every customer matching the list filters."""
+        ids=[int(i) for i in source.getlist('ids') if str(i).isdigit()] if hasattr(source,'getlist') else []
+        if ids:
+            return ids,{}
+        filters={k:str(source.get(k,'')) for k in BULK_FILTERS if source.get(k)}
+        _,_,where,args=customer_filter(user,filters)
+        rows=db.all('SELECT c.id FROM customers c WHERE '+where+" AND c.status!='deleted' ORDER BY c.id LIMIT 5000",args)
+        return [r['id'] for r in rows],filters
+
+    def bulk_page(request,user,source,stage='choose',status=200,**context):
+        ids,filters=bulk_targets(user,source)
+        action=str(source.get('action','add'))
+        if action not in service.BULK_ACTIONS:
+            action='add'
+        picked=[int(i) for i in (source.getlist('pick') if hasattr(source,'getlist') else []) if str(i).isdigit()]
+        choices=[i for i in allowed(None if user['role']=='admin' else user['id']) if i['protocol'] in service.protocols]
+        names={r['id']:(r['name'] or t('unnamed_inbound')) for r in db.all('SELECT id,name FROM inbounds')}
+        sample=db.all('SELECT id,email FROM customers WHERE id IN ('+','.join('?'*len(ids[:8]))+')',ids[:8]) if ids else []
+        explicit=[int(i) for i in source.getlist('ids') if str(i).isdigit()] if hasattr(source,'getlist') else []
+        ctx={'ids':explicit,'filters':filters,'count':len(ids),
+             'action':action,'picked':picked,'choices':choices,'names':names,'sample':sample,'plan':None,'changes':0,'skips':{}}
+        if stage=='preview' and ids:
+            plan=service.plan_bulk(user,ids,action,picked)
+            ctx['plan']=plan
+            ctx['changes']=sum(1 for i in plan if not i['skip'])
+            skips={}
+            for item in plan:
+                if item['skip']:
+                    skips[item['skip']]=skips.get(item['skip'],0)+1
+            ctx['skips']=skips
+        ctx.update(context)
+        return render(request,'bulk.html',status=status,**ctx)
+
+    @app.get('/bulk')
+    def bulk_start(request:Request):
+        user=require(request)
+        return bulk_page(request,user,request.query_params)
+
+    @app.post('/bulk')
+    async def bulk_step(request:Request):
+        user=require(request)
+        form=await request.form()
+        stage=str(form.get('stage','choose'))
+        try:
+            if stage=='apply':
+                ids,_=bulk_targets(user,form)
+                action=str(form.get('action',''))
+                picked=[int(i) for i in form.getlist('pick') if str(i).isdigit()]
+                plan=service.plan_bulk(user,ids,action,picked)
+                if not any(not i['skip'] for i in plan):
+                    raise RuleError('bulk_nothing')
+                names={r['id']:(r['name'] or t('unnamed_inbound')) for r in db.all('SELECT id,name FROM inbounds')}
+                label={'add':'Add','remove':'Remove','move':'Move to','enable':'Turn on','disable':'Turn off'}[action]
+                summary=label+(' '+', '.join(names.get(i,f'#{i}') for i in picked) if action in ('add','remove','move') else '')
+                job_id=service.create_bulk_job(user,action,picked,plan,summary)
+                if background:
+                    threading.Thread(target=service.run_bulk_job,args=(job_id,),daemon=True,name='relay-bulk').start()
+                else:
+                    service.run_bulk_job(job_id)
+                return redirect('/jobs/'+job_id)
+            return bulk_page(request,user,form,stage)
+        except FORM_ERRORS as exc:
+            code=error_code(exc)
+            return bulk_page(request,user,form,'choose',status=400,page_error=code,field_errors=field_errors(code,{'no_inbound':'pick','mixed_protocols':'pick','single_inbound':'pick'}))
+
+    @app.get('/jobs/{job_id}')
+    def job_page(request:Request,job_id:str):
+        user=require(request)
+        job=db.one('SELECT j.*,u.username actor_name FROM jobs j JOIN users u ON u.id=j.actor WHERE j.id=?',(job_id,))
+        if not job or (user['role']!='admin' and job['actor']!=user['id']):
+            raise RuleError('not_found',404)
+        items=json.loads(job['items'])
+        names={r['id']:(r['name'] or t('unnamed_inbound')) for r in db.all('SELECT id,name FROM inbounds')}
+        finished=job['done']+job['skipped']+job['failed']
+        return render(request,'job.html',job=job,items=items,names=names,finished=finished)
+
+    # ----- Settings (admin) ------------------------------------------------------
+
+    def check_sub_template(value):
+        value=value.strip()
+        if not value:
+            return ''
+        test=value.replace('{subId}','SUBID')
+        parts=urlsplit(test)
+        if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password or any(c.isspace() for c in value):
+            raise RuleError('invalid_sub_url')
+        return value
+
+    @app.get('/settings')
+    def settings_page(request:Request):
+        require(request,True)
+        row=db.one("SELECT value FROM state WHERE key='setting:sub_url'")
+        return render(request,'settings.html',sub_url=row['value'] if row else '',env_sub_url=config.sub_url,example=subscription_link_for('SUBSCRIPTION-ID'))
+
+    @app.post('/settings')
+    async def settings_save(request:Request):
+        user=require(request,True)
+        form=await request.form()
+        typed=str(form.get('sub_url',''))
+        try:
+            value=check_sub_template(typed)
+        except RuleError as exc:
+            return render(request,'settings.html',status=400,sub_url=typed,env_sub_url=config.sub_url,example='',
+                          page_error=exc.code,field_errors={'sub_url':exc.code})
+        with db.transaction() as conn:
+            set_state(conn,'setting:sub_url',value)
+            audit(conn,user['id'],'settings_update','subscription link')
+        return redirect('/settings','saved')
 
     # ----- Activity ------------------------------------------------------------
 

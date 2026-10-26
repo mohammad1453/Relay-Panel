@@ -13,7 +13,7 @@ TECHNICAL = {'customer_create_reserved', 'customer_update_reserved', 'customer_d
 
 # Groups for the activity filter.
 CATEGORIES = {
-    'customers': ('customer_%',),
+    'customers': ('customer_%', 'bulk_%'),
     'plan': ('grant%', 'reseller_%'),
     'signin': ('login', 'logout', 'password_%', 'bootstrap'),
     'system': ('inbound_removed', 'sync', 'restore_unlock', 'customer_remote_missing', 'customer_removed_during_setup'),
@@ -154,6 +154,13 @@ def describe(e, names, date):
         if count:
             parts.append((f"; {count} customer{'s' if count != 1 else ''} lost this inbound", False))
         tone, icon = 'warning', 'server'
+    elif action == 'bulk_inbounds':
+        parts, icon = [who, (' changed many customers: ', False), (str(data.get('summary', '')), True),
+                       (f" — {data.get('done', 0)} changed, {data.get('skipped', 0)} skipped, {data.get('failed', 0)} failed", False)], 'server'
+        tone = 'danger' if data.get('failed') else 'success'
+        link = f"/jobs/{data.get('job')}" if data.get('job') else None
+    elif action == 'settings_update':
+        parts, icon = [who, (' changed the ', False), (str(e['subject']), True), (' setting', False)], 'key'
     elif action == 'sync':
         parts, icon = [who, (' synced with 3X-UI', False)], 'sync'
     elif action == 'restore_unlock':

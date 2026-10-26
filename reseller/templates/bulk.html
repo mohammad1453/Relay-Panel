@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('bulk_title') }}{% endblock %}
+{% block heading %}<a href="/customers" class="crumb">{{ t('customers') }}</a> / {{ t('bulk_title') }}{% endblock %}
+{% block body %}
+{% macro carry() -%}
+{{ ui.csrf_field() }}
+{% for i in ids %}<input type="hidden" name="ids" value="{{ i }}">{% endfor %}
+{% if not ids %}{% for k,v in filters.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endif %}
+{%- endmacro %}
+<div class="page-head">
+  <div><h1>{{ t('bulk_title') }}</h1>
+  <p class="muted">{{ t('bulk_hint') }}</p></div>
+  <div class="actions-row"><a class="btn btn-ghost" href="/customers">{{ t('cancel') }}</a></div>
+</div>
+
+<section class="card">
+  <header class="card-head"><h2>{{ ui.icon('customers') }} {{ count }} {{ t('customers')|lower }}</h2>{% if not ids and filters %}<span class="tag tag-info">{{ t('bulk_by_filter') }}</span>{% elif not ids %}<span class="tag tag-info">{{ t('bulk_all') }}</span>{% endif %}</header>
+  {% if count %}
+  <div class="tags">{% for c in sample %}<span class="tag tag-outline">{{ display_name(c.email) }}</span>{% endfor %}{% if count>sample|length %}<span class="tag tag-muted">+{{ count-sample|length }} more</span>{% endif %}</div>
+  {% else %}<p class="muted">{{ t('no_results') }}</p>{% endif %}
+</section>
+
+{% if count %}
+<form method="post" action="/bulk" class="card stack" novalidate id="bulk-choose">
+  {{ carry() }}
+  <input type="hidden" name="stage" value="preview">
+  <header class="card-head"><h2>{{ ui.icon('edit') }} {{ t('bulk_what') }}</h2></header>
+  <div class="segmented" role="radiogroup" aria-label="{{ t('bulk_what') }}">
+    {% for key,icon_name in [('add','plus'),('remove','x'),('move','right'),('enable','check'),('disable','lock')] %}
+    <label class="segment"><input type="radio" name="action" value="{{ key }}" {{ 'checked' if action==key }} data-bulk-action data-explain="{{ t('bulk_explain_'+key) }}"><span>{{ ui.icon(icon_name) }} {{ t('bulk_'+key) }}</span></label>
+    {% endfor %}
+  </div>
+  <p class="muted" id="bulk-explain">{{ t('bulk_explain_'+action) }}</p>
+  <div id="bulk-inbounds" {{ 'hidden' if action in ('enable','disable') }}>
+    <h3 class="sub">{{ t('inbounds') }}</h3>
+    {{ ui.field_error('pick') }}
+    <div class="choice-grid" role="group" aria-label="{{ t('inbounds') }}">
+      {% for i in choices %}
+      <label class="choice {{ 'choice-off' if not i.available }}">
+        <input type="checkbox" name="pick" value="{{ i.id }}" {{ 'checked' if i.id in picked }}>
+        <span class="choice-body"><b>{{ i.name or t('unnamed_inbound') }}</b><small><span class="tag tag-proto">{{ i.protocol }}</span> port {{ i.port }}{% if not i.available %} · {{ t('disabled') }}{% endif %}</small></span>
+        <span class="choice-check">{{ ui.icon('check') }}</span>
+      </label>
+      {% else %}<div class="empty small">{{ ui.icon('server') }}<p>{{ t('bulk_no_inbounds') }}</p></div>{% endfor %}
+    </div>
+  </div>
+  <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('eye') }}<span>{{ t('bulk_preview') }}</span></button></div>
+</form>
+{% endif %}
+
+{% if plan is not none %}
+<section class="card stack">
+  <header class="card-head"><h2>{{ ui.icon('eye') }} {{ t('bulk_preview') }}</h2></header>
+  <div class="stats stats-3">
+    <div class="stat"><span class="stat-icon tone-success">{{ ui.icon('check') }}</span><div><small>{{ t('bulk_will_change') }}</small><b>{{ changes }}</b></div></div>
+    <div class="stat"><span class="stat-icon tone-muted">{{ ui.icon('right') }}</span><div><small>{{ t('bulk_will_skip') }}</small><b>{{ plan|length-changes }}</b></div></div>
+    <div class="stat"><span class="stat-icon tone-info">{{ ui.icon('clock') }}</span><div><small>{{ t('bulk_time') }}</small><b class="b-sm">~{{ [1,(changes*2/60)|round(0,'ceil')|int]|max }} min</b></div></div>
+  </div>
+  {% if skips %}<ul class="skip-list">{% for code,n in skips.items() %}<li><b>{{ n }}</b> {{ t(code) }}</li>{% endfor %}</ul>{% endif %}
+  <div class="table-wrap"><table class="table table-cards table-compact">
+    <thead><tr><th>{{ t('customer') }}</th>{% if user.role=='admin' %}<th>{{ t('owner') }}</th>{% endif %}<th>{{ t('bulk_before') }}</th><th>{{ t('bulk_after') }}</th></tr></thead>
+    <tbody>{% for item in plan[:150] %}<tr class="{{ 'row-muted' if item.skip }}">
+      <td data-label="{{ t('customer') }}"><a href="/customers/{{ item.cid }}">{{ display_name(item.email) }}</a></td>
+      {% if user.role=='admin' %}<td data-label="{{ t('owner') }}">{{ item.owner }}</td>{% endif %}
+      <td data-label="{{ t('bulk_before') }}"><div class="tags">{% for i in item.before %}<span class="tag tag-outline">{{ names.get(i, '#'~i) }}</span>{% endfor %}</div></td>
+      <td data-label="{{ t('bulk_after') }}">{% if item.skip %}<span class="muted">{{ t(item.skip) }}</span>{% elif item.enable is not none %}{{ ui.tag('enabled','success') if item.enable else ui.tag('disabled','muted') }}{% else %}<div class="tags">{% for i in item.after %}<span class="tag {{ 'tag-success' if i not in item.before else 'tag-outline' }}">{{ names.get(i, '#'~i) }}</span>{% endfor %}{% for i in item.before if i not in item.after %}<span class="tag tag-danger strike">{{ names.get(i, '#'~i) }}</span>{% endfor %}</div>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% if plan|length>150 %}<p class="muted">… and {{ plan|length-150 }} more.</p>{% endif %}
+  {% if changes %}
+  <form method="post" action="/bulk" class="actions-end">
+    {{ carry() }}
+    <input type="hidden" name="stage" value="apply"><input type="hidden" name="action" value="{{ action }}">
+    {% for i in picked %}<input type="hidden" name="pick" value="{{ i }}">{% endfor %}
+    {{ ui.confirm_button(t('bulk_apply')|replace('{n}', changes|string)|replace('1 customers','1 customer'), None, 'primary', 'check') }}
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

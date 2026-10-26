@@ -9,7 +9,7 @@
 <section class="card card-flush">
   {% if inbounds %}
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>#</th><th>{{ t('inbound_name') }}</th><th>{{ t('protocol') }}</th><th>{{ t('port') }}</th><th>{{ t('status') }}</th><th class="num">{{ t('resellers') }}</th><th class="num">{{ t('customers_count') }}</th><th>{{ t('synced') }}</th></tr></thead>
+    <thead><tr><th>#</th><th>{{ t('inbound_name') }}</th><th>{{ t('protocol') }}</th><th>{{ t('port') }}</th><th>{{ t('status') }}</th><th class="num">{{ t('resellers') }}</th><th class="num">{{ t('customers_count') }}</th><th>{{ t('synced') }}</th><th class="actions-col"><span class="sr">{{ t('actions') }}</span></th></tr></thead>
     <tbody>{% for i in inbounds %}<tr>
       <td data-label="#" class="muted">{{ i.id }}</td>
       <td data-label="{{ t('inbound_name') }}"><b>{{ i.name or t('unnamed_inbound') }}</b></td>
@@ -19,6 +19,10 @@
       <td data-label="{{ t('resellers') }}" class="num">{{ i.resellers }}</td>
       <td data-label="{{ t('customers_count') }}" class="num"><a href="/customers?inbound={{ i.id }}">{{ i.customers }}</a></td>
       <td data-label="{{ t('synced') }}" title="{{ date(i.synced) }}">{{ rel(i.synced) }}</td>
+      <td class="actions-col">{% if i.protocol in PROTOCOLS %}<div class="row-actions">
+        <a class="btn btn-ghost btn-sm" href="/bulk?action=add&amp;pick={{ i.id }}" title="{{ t('add_to_customers') }}">{{ ui.icon('plus') }}<span class="hide-sm">{{ t('add_to_customers') }}</span></a>
+        {% if i.customers %}<a class="btn-icon btn-icon-danger" href="/bulk?action=remove&amp;pick={{ i.id }}&amp;inbound={{ i.id }}" title="{{ t('remove_from_customers') }}" aria-label="{{ t('remove_from_customers') }}">{{ ui.icon('x') }}</a>{% endif %}
+      </div>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div>
   {% else %}

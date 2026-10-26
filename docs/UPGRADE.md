@@ -29,7 +29,7 @@ On the VPS, run the online installer. Relay is already installed, so it updates 
 bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
 ```
 
-It downloads the latest release, checks its SHA-256, makes another backup, stops only Relay, installs the new code, upgrades the database (to schema 3) and checks that Relay starts. 3X-UI is never stopped or changed. If anything fails, the previous version comes back automatically.
+It downloads the latest release, checks its SHA-256, makes another backup, stops only Relay, installs the new code, upgrades the database (to schema 4) and checks that Relay starts. 3X-UI is never stopped or changed. If anything fails, the previous version comes back automatically.
 
 <details><summary>Without the online installer</summary>
 
@@ -43,6 +43,8 @@ sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-panel-vX.Y.Z.tar.gz
 </details>
 
 ## 3. Settings to add
+
+The easiest way to set the subscription address is in the panel: sign in as admin, open **Settings**, enter it (for example `https://sub.example.com/i/`) and save. The file setting below does the same thing.
 
 Edit `/etc/3xui-reseller/app.env` and add or change:
 

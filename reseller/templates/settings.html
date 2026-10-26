@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('settings') }}{% endblock %}
+{% block heading %}{{ t('settings') }}{% endblock %}
+{% block body %}
+<div class="page-head"><div><h1>{{ t('settings') }}</h1><p class="muted">Settings that apply to the whole panel.</p></div></div>
+<form method="post" class="card stack" novalidate>
+  {{ ui.csrf_field() }}
+  <header class="card-head"><h2>{{ ui.icon('link') }} {{ t('subscription_link') }}</h2></header>
+  <p class="muted">The address your customers' apps use for their subscription. Relay adds each customer's subscription ID at the end. Leave it empty to hide subscription links.</p>
+  <label class="field">Subscription address
+    <input name="sub_url" value="{{ sub_url }}" placeholder="https://sub.example.com/i/" spellcheck="false" autocomplete="off" dir="ltr" {{ ui.invalid('sub_url') }}>
+    <small class="hint">Example: <code>https://sub.example.com/i/</code> gives <code>https://sub.example.com/i/SUBSCRIPTION-ID</code>. If the ID goes in the middle, write <code>{subId}</code> where it belongs, e.g. <code>https://sub.example.com/{subId}?format=json</code>.</small>
+    {{ ui.field_error('sub_url') }}
+  </label>
+  {% if not sub_url and env_sub_url %}<p class="muted">Currently used from the server file (<code>XUI_SUB_URL</code>): <code>{{ env_sub_url }}</code>. A value saved here takes priority.</p>{% endif %}
+  {% if example %}<div class="kv"><div><dt>Preview</dt><dd><code>{{ example }}</code></dd></div></div>{% endif %}
+  <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
+</form>
+{% endblock %}

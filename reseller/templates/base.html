@@ -13,7 +13,7 @@
 <body data-base-path="{{ base_path }}" data-invalid="{{ t('invalid_input') }}" data-copied="{{ t('copied') }}" class="{{ 'signed-in' if user else 'signed-out' }}">
 {% if user %}
 {%- set nav = [('/','dashboard','dashboard',false),('/customers','customers','customers',false),('/resellers','resellers','resellers',true),
-               ('/inbounds','inbounds','server',true),('/activity','activity','activity',false),('/attention','attention','alert',true),('/account','account','lock',false)] -%}
+               ('/inbounds','inbounds','server',true),('/activity','activity','activity',false),('/attention','attention','alert',true),('/settings','settings','key',true),('/account','account','lock',false)] -%}
 <div class="layout">
   <aside class="sidebar" id="sidebar" aria-label="{{ t('menu') }}">
     <a class="brand" href="/"><span class="brand-mark">R</span><span class="brand-text"><b>{{ t('brand') }}</b><small>{{ t('brand_sub') }}</small></span></a>

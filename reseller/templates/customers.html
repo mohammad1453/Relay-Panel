@@ -4,7 +4,8 @@
 {% block body %}
 <div class="page-head">
   <div><h1>{{ t('customers') }}</h1><p class="muted">{% if user.role=='admin' %}All customers of all resellers.{% else %}Everyone you sold a package to.{% endif %}</p></div>
-  {% if user.role=='admin' or writable %}<div class="actions-row"><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
+  {% set can_bulk = user.role=='admin' or writable %}
+  {% if user.role=='admin' or writable %}<div class="actions-row"><a class="btn btn-ghost" href="/bulk{{ link()[link().find('?'):] if '?' in link() else '' }}">{{ ui.icon('server') }}<span>{{ t('bulk_button') }}</span></a><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
 </div>
 <section class="card card-flush">
   <div class="toolbar">
@@ -25,11 +26,23 @@
     </form>
   </div>
   {% if rows %}
+  {% if can_bulk %}<form method="post" action="/bulk" id="bulk-form" class="bulk-bar" hidden>
+    {{ ui.csrf_field() }}
+    <span><b data-bulk-count>0</b> {{ t('bulk_selected') }}</span>
+    <button class="btn btn-primary btn-sm" name="action" value="add">{{ ui.icon('plus') }}<span>{{ t('bulk_add') }}</span></button>
+    <button class="btn btn-ghost btn-sm" name="action" value="remove">{{ ui.icon('x') }}<span>{{ t('bulk_remove') }}</span></button>
+    <button class="btn btn-ghost btn-sm" name="action" value="move">{{ ui.icon('right') }}<span>{{ t('bulk_move') }}</span></button>
+    <button class="btn btn-ghost btn-sm" name="action" value="enable">{{ ui.icon('check') }}<span>{{ t('bulk_enable') }}</span></button>
+    <button class="btn btn-ghost btn-sm" name="action" value="disable">{{ ui.icon('lock') }}<span>{{ t('bulk_disable') }}</span></button>
+    <button type="button" class="btn-icon" data-bulk-clear title="{{ t('bulk_clear') }}" aria-label="{{ t('bulk_clear') }}">{{ ui.icon('x') }}</button>
+    {% if total>rows|length %}<a class="link-sm" href="/bulk{{ link()[link().find('?'):] if '?' in link() else '' }}">{{ t('bulk_all_matching')|replace('{n}', total|string) }}</a>{% endif %}
+  </form>{% endif %}
   <div class="table-wrap"><table class="table table-cards">
-    <thead><tr><th>{{ t('customer') }}</th><th>{{ t('status') }}</th><th>{{ t('usage') }}</th><th>{{ t('expiry') }}</th><th>{{ t('inbounds') }}</th><th class="actions-col"><span class="sr">{{ t('details') }}</span></th></tr></thead>
+    <thead><tr>{% if can_bulk %}<th class="check-col"><input type="checkbox" data-bulk-all aria-label="{{ t('bulk_select_page') }}" title="{{ t('bulk_select_page') }}"></th>{% endif %}<th>{{ t('customer') }}</th><th>{{ t('status') }}</th><th>{{ t('usage') }}</th><th>{{ t('expiry') }}</th><th>{{ t('inbounds') }}</th><th class="actions-col"><span class="sr">{{ t('details') }}</span></th></tr></thead>
     <tbody>
     {% for c in rows %}
     <tr>
+      {% if can_bulk %}<td class="check-col">{% if c.status=='active' %}<input type="checkbox" name="ids" value="{{ c.id }}" form="bulk-form" data-bulk-item aria-label="{{ display_name(c.email) }}">{% endif %}</td>{% endif %}
       <td data-label="{{ t('customer') }}">
         <div class="cell-main">
           <span class="online-dot {{ 'on' if c.online and not c.stale and c.status=='active' else '' }}" title="{{ t('online') if c.online and not c.stale else t('offline') }}"></span>

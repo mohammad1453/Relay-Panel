@@ -16,7 +16,7 @@ def test_schema_one_upgrade_preserves_ledger_and_adds_refunds(tmp_path):
     db.migrate()
 
     with db.connect() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == 4
         assert tuple(conn.execute('SELECT kind,amount FROM ledger WHERE id=1').fetchone()) == ('sale', 50)
         conn.execute("INSERT INTO ledger(user_id,grant_id,kind,amount,actor,created) VALUES(1,1,'refund',10,1,3)")
         assert conn.execute("SELECT amount FROM ledger WHERE kind='refund'").fetchone()[0] == 10

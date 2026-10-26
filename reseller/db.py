@@ -40,7 +40,7 @@ class Database:
             if (tables or app_id) and app_id != APPLICATION_ID:
                 raise ValueError("Refusing a database not owned by this application")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 3:
+            if version > 4:
                 raise ValueError("Database requires a newer application")
             if version == 0:
                 sql = Path(__file__).with_name("migrations").joinpath("001.sql").read_text()
@@ -53,6 +53,10 @@ class Database:
             if version == 2:
                 sql = Path(__file__).with_name("migrations").joinpath("003.sql").read_text()
                 db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=3; COMMIT;")
+                version = 3
+            if version == 3:
+                sql = Path(__file__).with_name("migrations").joinpath("004.sql").read_text()
+                db.executescript("BEGIN IMMEDIATE;\n" + sql + "\nPRAGMA user_version=4; COMMIT;")
             db.execute("PRAGMA journal_mode=WAL")
         path.chmod(0o600)
 

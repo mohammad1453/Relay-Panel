@@ -76,6 +76,8 @@
       <div><dt>{{ t('inbounds') }}</dt><dd><div class="tags">{% for i in placements %}<span class="tag {{ 'tag-outline' if i.name else 'tag-warning' }}" title="{{ i.protocol or '' }} {{ i.port or '' }}">{{ i.name or t('unnamed_inbound') }}{% if i.protocol %} · {{ i.protocol }}{% endif %}</span>{% else %}<span class="muted">{{ t('no_inbounds_left') }}</span>{% endfor %}</div></dd></div>
       {% if user.role=='admin' %}<div><dt>Group</dt><dd>{{ p.group or '—' }}</dd></div>{% endif %}
       <div><dt>{{ t('sub_id') }}</dt><dd><code>{{ display_name(customer.sub_id) }}</code></dd></div>
+      {% set sub_link = subscription_link_for(customer.sub_id) if customer.status=='active' else '' %}
+      {% if sub_link %}<div><dt>{{ t('subscription_link') }}</dt><dd class="copy-inline"><input readonly id="detail-sub-link" value="{{ sub_link }}" dir="ltr" aria-label="{{ t('subscription_link') }}"><button type="button" class="btn btn-ghost btn-sm" data-copy="detail-sub-link">{{ ui.icon('copy') }}<span>{{ t('copy') }}</span></button></dd></div>{% endif %}
     </dl>
     {% if customer.status!='deleted' and (user.role=='admin' or writable) %}
     <div class="danger-row">

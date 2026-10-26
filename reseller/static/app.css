@@ -411,6 +411,8 @@ input[type="checkbox"] { width: auto; min-height: 0; accent-color: var(--primary
 .copy-block:last-child { border-bottom: 0; padding-bottom: 0; }
 .copy-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .copy-name { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.copy-inline { display: flex; gap: 6px; align-items: center; min-width: 0; flex: 1; justify-content: flex-end; }
+.copy-inline input { min-height: 30px; padding: 4px 8px; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 340px; }
 .sub-card { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
 .copy-block textarea { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 0; color: var(--text-2); word-break: break-all; }
 .btn.copied { border-color: var(--success); color: var(--success); }
@@ -426,6 +428,25 @@ input[type="checkbox"] { width: auto; min-height: 0; accent-color: var(--primary
 .tech { flex-basis: 100%; }
 .tech summary { color: var(--muted); font-size: 12px; cursor: pointer; }
 .tech code { display: block; margin-top: 6px; }
+
+/* ---------- Bulk changes ---------- */
+.check-col { width: 1%; padding-right: 0 !important; }
+.check-col input, .table input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; cursor: pointer; }
+.bulk-bar { position: sticky; top: 66px; z-index: 15; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; padding: 10px 16px;
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface)); border-bottom: 1px solid var(--border); }
+.bulk-bar > span { margin-right: 6px; }
+.segmented { display: flex; flex-wrap: wrap; gap: 6px; }
+.segment { cursor: pointer; }
+.segment input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.segment span { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text-2); font-weight: 600; }
+.segment span .icon { width: 15px; height: 15px; }
+.segment input:checked + span { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.segment input:focus-visible + span { box-shadow: var(--ring); }
+.stats-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.skip-list { margin: 0; padding-left: 18px; color: var(--text-2); }
+.row-muted td { opacity: .6; }
+.tag.strike { text-decoration: line-through; }
+.bar-primary > span { background: var(--primary); }
 
 /* ---------- Sign in ---------- */
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; position: relative;
@@ -456,6 +477,8 @@ input[type="checkbox"] { width: auto; min-height: 0; accent-color: var(--primary
   .topbar { padding: 0 12px; }
   .content { padding: 16px; gap: 14px; }
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .stats-3 { grid-template-columns: minmax(0, 1fr); }
+  .bulk-bar { top: 58px; }
   .search .input-icon input { width: 100%; }
   .search, .search .input-icon { flex: 1 1 100%; }
   .search select { flex: 1; min-width: 0; }

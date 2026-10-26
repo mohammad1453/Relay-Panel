@@ -21,7 +21,6 @@ import base64
 import json
 import secrets
 import threading
-import time
 from urllib.parse import quote
 import httpx
 
@@ -59,7 +58,6 @@ class XUI:
         self.mode = None            # CLIENT_API or CLASSIC_API once detected
         self.panel_version = ''     # as reported by the panel, when it reports one
         self._removed = {}          # classic: last settings of clients just removed, for a move
-        self._sub_base = (0, '')    # (fetched at, subscription base URL from 3X-UI settings)
         self.client = httpx.Client(base_url=config.xui_url.rstrip('/')+'/',
                                   timeout=httpx.Timeout(config.timeout, connect=config.connect_timeout),
                                   verify=True, follow_redirects=False, trust_env=False, transport=transport)
@@ -233,32 +231,6 @@ class XUI:
         if not isinstance(links,list) or not all(isinstance(x, str) for x in links):
             raise RemoteError('remote_schema')
         return links
-
-    def subscription_base(self):
-        """The subscription address 3X-UI shows in its own panel, without the subscription ID.
-
-        Read from the panel's settings (cached for 5 minutes). Empty when the panel's
-        subscription service is off or the settings cannot be read."""
-        fetched, base = self._sub_base
-        if time.time() - fetched < 300:
-            return base
-        headers = {'Host': self.config.link_host} if self.config.link_host else {}
-        base = ''
-        for path in ('panel/api/setting/defaultSettings', 'panel/setting/defaultSettings'):
-            try:
-                with self.lock:
-                    if not self.config.xui_token and not self.logged_in:
-                        self._login()
-                    data = self._call('POST', path, headers=headers)
-            except RemoteError:
-                continue
-            if isinstance(data, dict) and data.get('subEnable') and isinstance(data.get('subURI'), str):
-                base = data['subURI'].strip()
-            break
-        if base and not base.startswith(('http://', 'https://')):
-            base = ''
-        self._sub_base = (time.time(), base)
-        return base
 
     # ----- Writes --------------------------------------------------------------
 
