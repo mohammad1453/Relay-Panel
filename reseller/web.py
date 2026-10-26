@@ -840,8 +840,12 @@ def create_app(config=None, remote=None, background=True):
         c=customer_view(user,cid)
         if c['status']!='active':
             raise RuleError('reconcile_required',409)
-        with db.transaction() as conn:
-            active_grant(conn,c['user_id'])
+        owner=db.one('SELECT role FROM users WHERE id=?',(c['user_id'],))
+        if owner['role']!='admin':
+            # Reseller customers can only be changed while the reseller's plan is active.
+            # Admin customers have no plan.
+            with db.transaction() as conn:
+                active_grant(conn,c['user_id'])
         return customer_form_page(request,user,c)
 
     @app.post('/customers/{cid}/edit')

@@ -384,7 +384,15 @@ def test_admin_creates_customer_from_the_web(client,setup):
     assert response.status_code==303 and 'customer_created' in response.headers['location'],response.text
     assert panel.rows['by-admin']['group']=='RelayPanel'
     detail=client.get(response.headers['location']).text
-    assert '/customers/'+str(db.one("SELECT id FROM customers WHERE email='by-admin'")['id'])+'/edit' in detail
+    cid=db.one("SELECT id FROM customers WHERE email='by-admin'")['id']
+    assert '/customers/'+str(cid)+'/edit' in detail
+    edit_page=client.get('/customers/'+str(cid)+'/edit')
+    assert edit_page.status_code==200 and 'No plan limit' in edit_page.text
+    token=csrf(client,'/customers/'+str(cid)+'/edit')
+    response=client.post('/customers/'+str(cid)+'/edit',data={'csrf':token,'operation_id':str(uuid.uuid4()),'volume':'3000','first_use':'on','days':'60','enable':'on','inbounds':['1','2'],'comment':'edited by admin'},follow_redirects=False)
+    assert 'customer_updated' in response.headers['location'],response.text
+    assert panel.rows['by-admin']['totalGB']==3000*1024**3 and panel.rows['by-admin']['inboundIds']==[1,2]
+    assert panel.rows['by-admin']['comment']=='edited by admin' and panel.rows['by-admin']['group']=='RelayPanel'
 
 
 def test_links_titles_and_subscription_first(client,setup):
