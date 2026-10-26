@@ -1,0 +1,17 @@
+CREATE TABLE telegram_links (
+ user_id INTEGER PRIMARY KEY REFERENCES users(id), chat_id INTEGER NOT NULL UNIQUE,
+ name TEXT NOT NULL DEFAULT '', prefs TEXT NOT NULL DEFAULT '{}', linked INTEGER NOT NULL
+);
+CREATE TABLE telegram_codes (
+ code TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires INTEGER NOT NULL
+);
+CREATE TABLE outbox (
+ id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, text TEXT NOT NULL, buttons TEXT NOT NULL DEFAULT '[]',
+ dedupe TEXT UNIQUE, created INTEGER NOT NULL, sent INTEGER, attempts INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX outbox_pending ON outbox(sent, attempts);
+CREATE TABLE requests (
+ id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), volume INTEGER NOT NULL CHECK(volume>0),
+ days INTEGER NOT NULL CHECK(days>=0), note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, created INTEGER NOT NULL,
+ decided_by INTEGER REFERENCES users(id), decided INTEGER, answer TEXT NOT NULL DEFAULT ''
+);

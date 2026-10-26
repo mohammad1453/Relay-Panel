@@ -1111,3 +1111,64 @@ class Service:
                 if item['state'] == 'waiting':
                     item['state'], item['reason'] = 'skipped', 'bulk_interrupted'
             self._save_job(job['id'], items, 'interrupted')
+
+    # ----- Requests: a reseller asks the admin for more data -------------------
+
+    def create_request(self, actor, volume_gb, days, note=''):
+        """A reseller asks for more data (and optionally more days). One open request at a time."""
+        if actor['role'] != 'reseller':
+            raise RuleError('forbidden', 403)
+        amount = volume(volume_gb)
+        try:
+            days = int(days or 0)
+        except (TypeError, ValueError):
+            raise RuleError('invalid_expiry') from None
+        if not 0 <= days <= 3650:
+            raise RuleError('invalid_expiry')
+        note = str(note or '').strip()[:500]
+        with self.db.transaction() as db:
+            if db.execute("SELECT 1 FROM requests WHERE user_id=? AND status='pending'", (actor['id'],)).fetchone():
+                raise RuleError('request_pending', 409)
+            rid = db.execute("INSERT INTO requests(user_id,volume,days,note,status,created) VALUES(?,?,?,?,'pending',?)",
+                             (actor['id'], amount, days, note, now())).lastrowid
+            audit(db, actor['id'], 'request_created', dumps({'request': rid, 'volume': amount, 'days': days}))
+        return rid
+
+    def decide_request(self, actor, request_id, approve, volume_gb=None, days=None, answer=''):
+        """Approve (top up the plan, or start a new one if none is active) or decline a request."""
+        if actor['role'] != 'admin':
+            raise RuleError('forbidden', 403)
+        answer = str(answer or '').strip()[:500]
+        with self.db.transaction() as db:
+            req = db.execute('SELECT * FROM requests WHERE id=?', (request_id,)).fetchone()
+            if not req:
+                raise RuleError('not_found', 404)
+            if req['status'] != 'pending':
+                raise RuleError('request_decided', 409)
+            owner = db.execute("SELECT * FROM users WHERE id=? AND deleted=0", (req['user_id'],)).fetchone()
+            if not owner:
+                raise RuleError('not_found', 404)
+            amount, extra_days = req['volume'], req['days']
+            if approve:
+                if volume_gb not in (None, ''):
+                    amount = volume(volume_gb)
+                if days not in (None, ''):
+                    try:
+                        extra_days = int(days)
+                    except (TypeError, ValueError):
+                        raise RuleError('invalid_expiry') from None
+                    if not 0 <= extra_days <= 3650:
+                        raise RuleError('invalid_expiry')
+                grant = db.execute('SELECT * FROM grants WHERE user_id=? AND closed=0 AND starts<=? AND expires>? ORDER BY id DESC LIMIT 1',
+                                   (owner['id'], now(), now())).fetchone()
+                if grant:
+                    db.execute('UPDATE grants SET allowance=allowance+?,expires=expires+? WHERE id=?', (amount, extra_days*86400, grant['id']))
+                    db.execute("INSERT INTO ledger(user_id,grant_id,kind,amount,actor,created) VALUES(?,?,'adjust',?,?,?)",
+                               (owner['id'], grant['id'], amount, actor['id'], now()))
+                    audit(db, actor['id'], 'grant_adjust', grant['id'])
+                else:
+                    self._grant(db, actor['id'], owner['id'], str(Decimal(amount)/GIB), now()+max(1, extra_days or 30)*86400)
+            db.execute('UPDATE requests SET status=?,decided_by=?,decided=?,answer=?,volume=?,days=? WHERE id=?',
+                       ('approved' if approve else 'declined', actor['id'], now(), answer, amount, extra_days, request_id))
+            audit(db, actor['id'], 'request_approved' if approve else 'request_declined',
+                  dumps({'request': request_id, 'user': owner['id'], 'volume': amount, 'days': extra_days}))

@@ -16,4 +16,33 @@
   {% if example %}<div class="kv"><div><dt>Preview</dt><dd><code>{{ example }}</code></dd></div></div>{% endif %}
   <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
 </form>
+
+<form method="post" action="/settings/telegram" class="card stack" novalidate id="telegram">
+  {{ ui.csrf_field() }}
+  <header class="card-head"><h2>{{ ui.icon('send') }} Telegram bot</h2>
+    {% if tg.enabled and tg.error %}<span class="tag tag-danger">Not connected</span>{% elif tg.enabled and tg.username %}<span class="tag tag-success">@{{ tg.username }}</span>{% elif tg.enabled %}<span class="tag tag-warning">Starting</span>{% else %}<span class="tag tag-muted">Off</span>{% endif %}</header>
+  <p class="muted">Get alerts and approve requests from Telegram. Create a bot with <b>@BotFather</b> in Telegram (send <code>/newbot</code>), copy the token it gives you and paste it here. Then connect your own chat on the <a href="/account">Account</a> page. Resellers can connect theirs too.</p>
+  {% if tg.enabled and tg.error %}{{ ui.alert('danger', 'Telegram problem: '+tg.error, false) }}{% endif %}
+  {% if tg_error_detail is defined and tg_error_detail %}<p class="field-error">{{ tg_error_detail }}</p>{% endif %}
+  <label class="switch"><input type="checkbox" name="enabled" {{ 'checked' if tg.enabled }}><span class="switch-track"></span><span>Bot is on</span></label>
+  <label class="field">Bot token
+    <span class="input-icon">{{ ui.icon('key') }}<input name="token" type="password" autocomplete="off" spellcheck="false" dir="ltr" placeholder="{{ 'Saved. Leave empty to keep it.' if tg_has_token else '123456789:AA…' }}" {{ ui.invalid('token') }}><button type="button" class="reveal" data-reveal aria-label="{{ t('show') }}">{{ ui.icon('eye') }}</button></span>
+    {{ ui.field_error('token') }}
+  </label>
+  <div class="grid-2">
+    <label class="field">Proxy (optional)
+      <input name="proxy" value="{{ tg_proxy }}" placeholder="socks5://127.0.0.1:1080" spellcheck="false" dir="ltr" {{ ui.invalid('proxy') }}>
+      <small class="hint">Only if this server cannot reach Telegram directly. socks5://, http:// or https://.</small>{{ ui.field_error('proxy') }}
+    </label>
+    <label class="field">Daily report at (hour, {{ timezone }})
+      <input name="report_hour" type="number" min="0" max="23" value="{{ tg_hour }}" {{ ui.invalid('report_hour') }}>{{ ui.field_error('report_hour') }}
+    </label>
+  </div>
+  <div class="actions-end">
+    <button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button>
+  </div>
+</form>
+{% if tg.enabled and tg_linked %}
+<form method="post" action="/settings/telegram/test" class="actions-end">{{ ui.csrf_field() }}<button class="btn btn-ghost" data-working="{{ t('working') }}">{{ ui.icon('send') }}<span>Send me a test message</span></button></form>
+{% endif %}
 {% endblock %}

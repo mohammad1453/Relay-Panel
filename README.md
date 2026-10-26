@@ -15,6 +15,8 @@ Relay adds **resellers** to [3X-UI](https://github.com/MHSanaei/3x-ui). You give
 - **Change many customers at once:** add, remove or move inbounds (or turn customers on/off) for selected customers or a whole filtered list, with a preview before anything changes.
 - **Settings page:** set your subscription address once (e.g. `https://sub.example.com/i/`); every customer gets their own link.
 - **Needs attention** page for the admin: anything Relay could not finish, explained in plain words with the right buttons. If someone edits a customer directly in 3X-UI, you see exactly what changed and can accept it with one click.
+- **Telegram bot:** alerts for the admin and each reseller, with buttons to approve requests, accept 3X-UI changes, turn customers on or off and more. See [docs/TELEGRAM.md](docs/TELEGRAM.md).
+- **Requests for more data:** resellers ask from their dashboard or the bot; the admin approves or declines with one click.
 - **Readable activity log** for admins and resellers ("You created customer ali-phone", "Inbound VMess WS was deleted in 3X-UI").
 - **Safe accounting:** quota is held while 3X-UI confirms a change and only counted once it is verified.
 - Dark and light theme, works on phones, English interface.
@@ -120,6 +122,7 @@ Relay uses [semantic versioning](https://semver.org/). The current version is sh
 
 - [Installation guide](docs/INSTALL.en.md) · [راهنمای نصب فارسی](docs/INSTALL.fa.md) (installation only; the panel is in English)
 - [Upgrading from 0.1.0](docs/UPGRADE.md)
+- [Telegram bot](docs/TELEGRAM.md)
 - [How Relay works and recovers](docs/ARCHITECTURE.md)
 - [3X-UI compatibility and API](docs/API.md)
 - [Security and known limits](docs/VERIFICATION.md)
@@ -144,6 +147,7 @@ Project layout:
 | `reseller/domain.py` | Plans, customers, quota accounting and sync with 3X-UI |
 | `reseller/xui.py` | 3X-UI connection (detects client API or classic API) |
 | `reseller/web.py`, `templates/`, `static/` | Web panel |
+| `reseller/telegram.py` | Telegram bot: alerts, commands and buttons |
 | `reseller/activity.py` | Turns logs into readable sentences |
 | `reseller/security.py` | Passwords, sessions, rate limits |
 | `deploy/ops.py` | Install, update, backup, restore, uninstall |

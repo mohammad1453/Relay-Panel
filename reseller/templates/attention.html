@@ -4,9 +4,31 @@
 {% block body %}
 <div class="page-head"><div><h1>{{ t('attention') }}</h1><p class="muted">{{ t('attention_hint') }}</p></div>
 <form method="post" action="/sync">{{ ui.csrf_field() }}<button class="btn btn-ghost" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('sync_now') }}</span></button></form></div>
-{% if not items %}
+{% if not items and not requests %}
 <section class="card">{{ ui.empty('check', t('all_clear')) }}</section>
 {% endif %}
+{% for r in requests %}
+<section class="card attention-card tone-border-info">
+  <header class="attention-head">
+    <div class="cell-main"><span class="feed-icon tone-info">{{ ui.icon('send') }}</span>
+      <div><a class="strong-link" href="/resellers/{{ r.user_id }}?tab=plan">{{ r.username }}</a>
+      <small class="muted">{{ t('request_asks') }} · {{ rel(r.created) }}</small></div></div>
+    <span class="tag tag-info">{{ t('request_tag') }}</span>
+  </header>
+  <p><b>{{ gb(r.volume) }} GB</b>{% if r.days %} + <b>{{ r.days }} {{ t('days_unit') }}</b>{% endif %}{% if r.note %} — “{{ r.note }}”{% endif %}</p>
+  <p class="muted">{% if r.plan %}{{ t('request_plan_now') }}: {{ gb(r.plan.sold+r.plan.reserved) }} / {{ gb(r.plan.allowance) }} GB, {{ t('plan_expires')|lower }} {{ date(r.plan.expires) }}{% else %}{{ t('request_no_plan') }}{% endif %}</p>
+  <form method="post" action="/requests/{{ r.id }}/approve" class="request-form">
+    {{ ui.csrf_field() }}
+    <label class="field">{{ t('volume') }}<span class="input-suffix"><input name="volume" type="number" min="1" step="1" value="{{ (r.volume/1073741824)|round(2)|string|replace('.0','') }}"><span>GB</span></span></label>
+    <label class="field">{{ t('request_days') }}<span class="input-suffix"><input name="days" type="number" min="0" max="3650" value="{{ r.days }}"><span>{{ t('days_unit') }}</span></span></label>
+    <label class="field grow">{{ t('request_answer') }}<input name="answer" maxlength="500" placeholder="{{ t('request_answer_hint') }}"></label>
+    <div class="actions-row">
+      <button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('request_approve') }}</span></button>
+      <button class="btn btn-ghost btn-sm" formaction="/requests/{{ r.id }}/decline" data-working="{{ t('working') }}">{{ ui.icon('x') }}<span>{{ t('request_decline') }}</span></button>
+    </div>
+  </form>
+</section>
+{% endfor %}
 {% for item in items %}
 <section class="card attention-card tone-border-{{ item.tone }}">
   <header class="attention-head">

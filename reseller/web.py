@@ -20,6 +20,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import activity, __version__
 from .links import label_links
+from .telegram import Telegram, TelegramError, PREFS as TELEGRAM_PREFS
 from .config import Config
 from .db import Database, now, audit
 from .domain import (Service, RuleError, GIB, PROTOCOLS, DRIFT_ISSUES, active_grant, owned, volume,
@@ -71,7 +72,7 @@ class PathPrefix:
         return await self.app(child,receive,send)
 
 
-def create_app(config=None, remote=None, background=True):
+def create_app(config=None, remote=None, background=True, telegram_transport=None):
     config = (config or Config.env()).validate()
     db = Database(config.db)
     db.migrate()
@@ -131,7 +132,11 @@ def create_app(config=None, remote=None, background=True):
     @asynccontextmanager
     async def lifespan(app):
         task = asyncio.create_task(worker()) if background else None
+        bot = threading.Thread(target=telegram.run_forever, daemon=True, name='relay-telegram') if background else None
+        if bot:
+            bot.start()
         yield
+        telegram.stop.set()
         if task:
             task.cancel()
             try:
@@ -142,7 +147,8 @@ def create_app(config=None, remote=None, background=True):
             remote.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.db,app.state.service,app.state.config = db,service,config
+    telegram = Telegram(db, service, config, lambda sub_id: subscription_link_for(sub_id), transport=telegram_transport)
+    app.state.db,app.state.service,app.state.config,app.state.telegram = db,service,config,telegram
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(config.origin).hostname,'127.0.0.1','localhost'])
     app.mount('/static',StaticFiles(directory=Path(__file__).with_name('static')),name='static')
     cookie_name='relay_session_'+digest(config.base_path)[:12] if config.base_path else 'relay_session'
@@ -190,7 +196,8 @@ def create_app(config=None, remote=None, background=True):
     def attention_count():
         return db.one("""SELECT (SELECT count(*) FROM customers c WHERE (c.status='active' AND c.issue!='' AND NOT EXISTS(
                              SELECT 1 FROM operations o WHERE o.customer_id=c.id AND o.status IN ('sent','uncertain'))) OR c.status='failed')
-                         + (SELECT count(*) FROM operations WHERE status IN ('sent','uncertain')) n""")['n']
+                         + (SELECT count(*) FROM operations WHERE status IN ('sent','uncertain'))
+                         + (SELECT count(*) FROM requests WHERE status='pending') n""")['n']
 
     def render(request,name,status=200,**context):
         user=request.state.user
@@ -385,7 +392,7 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/healthz')
     def health():
         db.one('SELECT 1 AS ok')
-        return {'status':'ok','schema':4,'version':__version__}
+        return {'status':'ok','schema':5,'version':__version__}
 
     # ----- Sign in and account -----------------------------------------------
 
@@ -420,10 +427,41 @@ def create_app(config=None, remote=None, background=True):
             response.delete_cookie('relay_session',path='/')
         return response
 
+    def account_page(request,user,status=200,**context):
+        link=telegram.linked(user['id'])
+        ctx={'tg_ready':bool(telegram.setting('token')) and telegram.enabled(),'tg_link':link,
+             'tg_prefs':telegram.prefs(user,link) if link else {},'tg_pref_labels':TELEGRAM_PREFS[user['role']],
+             'tg_username':telegram.status()['username'],'tg_code':''}
+        ctx.update(context)
+        return render(request,'account.html',status=status,**ctx)
+
     @app.get('/account')
     def account(request:Request):
-        require(request)
-        return render(request,'account.html')
+        return account_page(request,require(request))
+
+    @app.post('/account/telegram/connect')
+    def telegram_connect(request:Request):
+        user=require(request)
+        if not telegram.enabled():
+            raise RuleError('telegram_off',409)
+        if not telegram.status()['username']:
+            try:
+                telegram.check()
+            except TelegramError:
+                raise RuleError('telegram_unreachable',503) from None
+        return account_page(request,user,tg_code=telegram.new_code(user))
+
+    @app.post('/account/telegram/unlink')
+    def telegram_unlink(request:Request):
+        telegram.unlink(require(request))
+        return redirect('/account','telegram_unlinked')
+
+    @app.post('/account/telegram/prefs')
+    async def telegram_prefs(request:Request):
+        user=require(request)
+        form=await request.form()
+        telegram.set_prefs(user,set(form.getlist('pref')))
+        return redirect('/account','saved')
 
     @app.post('/account')
     async def account_save(request:Request):
@@ -432,11 +470,11 @@ def create_app(config=None, remote=None, background=True):
         # Shared persistent login limiter also bounds old-password guessing.
         valid=await run_in_threadpool(authenticate,db,user['username'],str(form.get('current_password','')),request.client.host)
         if not valid:
-            return render(request,'account.html',status=400,page_error='wrong_password',field_errors={'current_password':'wrong_password'})
+            return account_page(request,user,status=400,page_error='wrong_password',field_errors={'current_password':'wrong_password'})
         try:
             hashed=await run_in_threadpool(password_hash,str(form.get('new_password','')))
         except ValueError:
-            return render(request,'account.html',status=400,page_error='password_policy',field_errors={'new_password':'password_policy'})
+            return account_page(request,user,status=400,page_error='password_policy',field_errors={'new_password':'password_policy'})
         with db.transaction() as conn:
             conn.execute('UPDATE users SET password_hash=?,must_change=0 WHERE id=?',(hashed,user['id']))
             conn.execute('DELETE FROM sessions WHERE user_id=?',(user['id'],))
@@ -484,7 +522,8 @@ def create_app(config=None, remote=None, background=True):
                           FROM customers c WHERE user_id=? AND status='active'""",(user['id'],))
         movements=activity.ledger_rows(db,db.all("SELECT l.*,u.username actor_name FROM ledger l LEFT JOIN users u ON u.id=l.actor WHERE l.user_id=? ORDER BY l.id DESC LIMIT 30",(user['id'],)),reseller_view=True)[:8]
         last_plan=None if plan else db.one('SELECT * FROM grants WHERE user_id=? ORDER BY id DESC LIMIT 1',(user['id'],))
-        return render(request,'dashboard.html',plan=plan,last_plan=last_plan,counts=counts,feed=feed,movements=movements)
+        last_request=db.one('SELECT * FROM requests WHERE user_id=? ORDER BY id DESC LIMIT 1',(user['id'],))
+        return render(request,'dashboard.html',plan=plan,last_plan=last_plan,counts=counts,feed=feed,movements=movements,last_request=last_request)
 
     # ----- Sync ----------------------------------------------------------------
 
@@ -1016,8 +1055,15 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/settings')
     def settings_page(request:Request):
         require(request,True)
+        return settings_render(request)
+
+    def settings_render(request,status=200,**context):
         row=db.one("SELECT value FROM state WHERE key='setting:sub_url'")
-        return render(request,'settings.html',sub_url=row['value'] if row else '',env_sub_url=config.sub_url,example=subscription_link_for('SUBSCRIPTION-ID'))
+        ctx={'sub_url':row['value'] if row else '','env_sub_url':config.sub_url,'example':subscription_link_for('SUBSCRIPTION-ID'),
+             'tg':telegram.status(),'tg_has_token':bool(telegram.setting('token')),'tg_proxy':telegram.setting('proxy'),
+             'tg_hour':telegram.setting('report_hour','9'),'tg_linked':telegram.linked(request.state.user['id'])}
+        ctx.update(context)
+        return render(request,'settings.html',status=status,**ctx)
 
     @app.post('/settings')
     async def settings_save(request:Request):
@@ -1027,12 +1073,86 @@ def create_app(config=None, remote=None, background=True):
         try:
             value=check_sub_template(typed)
         except RuleError as exc:
-            return render(request,'settings.html',status=400,sub_url=typed,env_sub_url=config.sub_url,example='',
-                          page_error=exc.code,field_errors={'sub_url':exc.code})
+            return settings_render(request,status=400,sub_url=typed,example='',page_error=exc.code,field_errors={'sub_url':exc.code})
         with db.transaction() as conn:
             set_state(conn,'setting:sub_url',value)
             audit(conn,user['id'],'settings_update','subscription link')
         return redirect('/settings','saved')
+
+    @app.post('/settings/telegram')
+    async def settings_telegram(request:Request):
+        user=require(request,True)
+        form=await request.form()
+        token=str(form.get('token','')).strip()
+        proxy=str(form.get('proxy','')).strip()
+        hour=str(form.get('report_hour','9')).strip()
+        errors={}
+        if token and (':' not in token or any(c.isspace() for c in token) or len(token)>100):
+            errors['token']='telegram_bad_token'
+        if proxy and urlsplit(proxy).scheme not in ('http','https','socks5','socks5h'):
+            errors['proxy']='telegram_bad_proxy'
+        if not hour.isdigit() or not 0<=int(hour)<=23:
+            errors['report_hour']='invalid_input'
+        if errors:
+            return settings_render(request,status=400,page_error=next(iter(errors.values())),field_errors=errors,tg_proxy=proxy,tg_hour=hour)
+        telegram.save_settings(user,enabled='1' if form.get('enabled')=='on' else '0',token=token or None,proxy=proxy,report_hour=hour)
+        if token:
+            with db.transaction() as conn:
+                conn.execute("DELETE FROM state WHERE key IN ('tg:username','tg:error','tg:offset')")
+        if form.get('enabled')=='on':
+            try:
+                telegram.check()
+            except TelegramError as exc:
+                return settings_render(request,status=400,page_error='telegram_unreachable',tg_error_detail=str(exc))
+        return redirect('/settings','saved')
+
+    @app.post('/settings/telegram/test')
+    def settings_telegram_test(request:Request):
+        user=require(request,True)
+        link=telegram.linked(user['id'])
+        if not link:
+            raise RuleError('telegram_not_linked',409)
+        try:
+            telegram.api().call('sendMessage',chat_id=link['chat_id'],text='✅ Test message from Relay. Alerts will arrive here.')
+        except (TelegramError,AttributeError) as exc:
+            return settings_render(request,status=400,page_error='telegram_unreachable',tg_error_detail=str(exc))
+        return redirect('/settings','telegram_test_sent')
+
+    # ----- Requests for more data ---------------------------------------------------
+
+    @app.get('/requests/new')
+    def request_new(request:Request):
+        user=require(request)
+        if user['role']!='reseller':
+            raise RuleError('forbidden',403)
+        return render(request,'request_form.html',form_data={'volume':'','days':'0','note':''})
+
+    @app.post('/requests/new')
+    async def request_create(request:Request):
+        user=require(request)
+        form=await request.form()
+        values={k:str(form.get(k,'')) for k in ('volume','days','note')}
+        try:
+            service.create_request(user,values['volume'],values['days'] or 0,values['note'])
+        except FORM_ERRORS as exc:
+            code=error_code(exc)
+            return render(request,'request_form.html',status=400,form_data=values,page_error=code,
+                          field_errors=field_errors(code,{'invalid_expiry':'days'}))
+        return redirect('/','request_sent')
+
+    @app.post('/requests/{rid}/approve')
+    async def request_approve(request:Request,rid:int):
+        user=require(request,True)
+        form=await request.form()
+        service.decide_request(user,rid,True,form.get('volume') or None,form.get('days') or None,str(form.get('answer','')))
+        return redirect(back(request,'/attention'),'request_approved_msg')
+
+    @app.post('/requests/{rid}/decline')
+    async def request_decline(request:Request,rid:int):
+        user=require(request,True)
+        form=await request.form()
+        service.decide_request(user,rid,False,answer=str(form.get('answer','')))
+        return redirect(back(request,'/attention'),'request_declined_msg')
 
     # ----- Activity ------------------------------------------------------------
 
@@ -1079,7 +1199,10 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/attention')
     def attention(request:Request):
         require(request,True)
-        return render(request,'attention.html',items=attention_items())
+        requests=db.all("SELECT r.*,u.username FROM requests r JOIN users u ON u.id=r.user_id WHERE r.status='pending' ORDER BY r.id")
+        for r in requests:
+            r['plan']=current_plan(r['user_id'])
+        return render(request,'attention.html',items=attention_items(),requests=requests)
 
     @app.get('/operations')
     def operations(request:Request):
