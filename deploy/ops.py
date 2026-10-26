@@ -349,7 +349,7 @@ def extract_backup(archive,destination):
         if hashlib.sha256((destination/name).read_bytes()).hexdigest()!=manifest['files'].get(name):
             fail('Backup checksum mismatch')
     with contextlib.closing(sqlite3.connect('file:'+str(destination/'app.db')+'?mode=ro',uri=True)) as conn:
-        if conn.execute('PRAGMA application_id').fetchone()[0]!=APP_ID or conn.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3,4) or conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
+        if conn.execute('PRAGMA application_id').fetchone()[0]!=APP_ID or conn.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3,4,5) or conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
             fail('Backup database validation failed')
 
 

@@ -6,6 +6,32 @@ All notable changes to Relay are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-26
+
+Update in place with the online installer; the database is upgraded to schema 5
+automatically. The bot is off until you turn it on in **Settings**.
+
+### Added
+- **Telegram bot.** Admins and resellers connect their own Telegram account
+  from **Account → Connect Telegram** and choose which messages they get.
+  - Admin alerts with buttons: customers changed in 3X-UI (**Accept 3X-UI
+    values** / **Remove**), stuck or failed changes (**Check again**), requests
+    for more data (**Approve** / **Decline**), 3X-UI unreachable and back,
+    reseller plans at 90% or ending, customers and inbounds deleted in 3X-UI,
+    bulk changes finished, optional sales and sign-in alerts, daily report.
+  - Reseller alerts: plan almost used up, ending, renewed; answers to requests;
+    customers deleted in 3X-UI; daily summary of customers expiring or out of data.
+  - Commands: `/status`, `/attention`, `/requests`, `/find`, `/customers`,
+    `/resellers`, `/request`, `/report`, `/sync`, `/help`. `/find` shows each
+    customer with **Turn on/off**, **Links** and **Remove** (asks first) buttons.
+  - Messages that fail to send are retried; repeated alerts are sent only once.
+  - Optional proxy (`socks5://`, `http://`) for servers where Telegram is blocked.
+- **Requests for more data.** Resellers press **Request more data** on their
+  dashboard (or `/request 50 30` in the bot). The admin sees it under **Needs
+  attention** and in Telegram, can change the amount and days, and approves or
+  declines with an optional answer. Approving adds to the current plan, or
+  starts a new one when the old plan has ended.
+
 ## [1.0.0] - 2026-10-26
 
 First stable release. Update an existing 0.1.0 install in place with the online
@@ -79,6 +105,7 @@ to schema 3 automatically.
 
 Initial public version.
 
-[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/mohammad1453/Relay-Panel/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mohammad1453/Relay-Panel/releases/tag/v1.0.0
 [0.1.0]: https://github.com/mohammad1453/Relay-Panel/commit/3ce308d

@@ -46,7 +46,7 @@
 {% else %}
 <div class="page-head">
   <div><h1>Hello, {{ user.username }}</h1><p class="muted">{{ t('quota_hint') }}</p></div>
-  {% if plan %}<div class="actions-row"><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
+  <div class="actions-row">{% if not last_request or last_request.status!='pending' %}<a class="btn btn-ghost" href="/requests/new">{{ ui.icon('send') }}<span>{{ t('request_title') }}</span></a>{% endif %}{% if plan %}<a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a>{% endif %}</div>
 </div>
 {% if plan %}
 {%- set left = [0, plan.allowance-plan.sold-plan.reserved]|max -%}
@@ -68,6 +68,11 @@
 </section>
 {% else %}
 {{ ui.alert('warning', t('plan_expired'), false, t('no_plan')+'.') }}
+{% endif %}
+{% if last_request and last_request.status=='pending' %}
+{{ ui.alert('info', t('request_waiting')|replace('{gb}', gb(last_request.volume)), false) }}
+{% elif last_request and last_request.decided and now-last_request.decided<7*86400 %}
+{{ ui.alert('success' if last_request.status=='approved' else 'warning', (t('request_was_approved') if last_request.status=='approved' else t('request_was_declined'))|replace('{gb}', gb(last_request.volume)) + (' “'+last_request.answer+'”' if last_request.answer else ''), true) }}
 {% endif %}
 <div class="stats">
   <a class="stat" href="/customers"><span class="stat-icon tone-primary">{{ ui.icon('customers') }}</span><div><small>{{ t('total_customers') }}</small><b>{{ number(counts.n) }}</b></div></a>

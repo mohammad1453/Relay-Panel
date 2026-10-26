@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('request_title') }}{% endblock %}
+{% block heading %}{{ t('request_title') }}{% endblock %}
+{% block body %}
+<div class="page-head"><div><h1>{{ t('request_title') }}</h1><p class="muted">{{ t('request_hint') }}</p></div>
+<div class="actions-row"><a class="btn btn-ghost" href="/">{{ t('cancel') }}</a></div></div>
+<form method="post" class="card stack narrow-card" novalidate>
+  {{ ui.csrf_field() }}
+  <label class="field">{{ t('request_volume') }}
+    <span class="input-suffix"><input id="req-volume" name="volume" type="number" min="1" step="1" required value="{{ form_data.get('volume','') }}" {{ ui.invalid('volume') }}><span>GB</span></span>
+    <span class="quick">{% for n in (50,100,200,500) %}<button type="button" class="chip" data-fill="req-volume" data-value="{{ n }}">{{ n }} GB</button>{% endfor %}</span>
+    {{ ui.field_error('volume') }}
+  </label>
+  <label class="field">{{ t('request_days') }}
+    <span class="input-suffix"><input id="req-days" name="days" type="number" min="0" max="3650" value="{{ form_data.get('days','0') }}" {{ ui.invalid('days') }}><span>{{ t('days_unit') }}</span></span>
+    <span class="quick">{% for d in (0,30,60,90) %}<button type="button" class="chip" data-fill="req-days" data-value="{{ d }}">{{ d }} {{ t('days_unit') }}</button>{% endfor %}</span>
+    <small class="hint">{{ t('request_days_hint') }}</small>{{ ui.field_error('days') }}
+  </label>
+  <label class="field">{{ t('comment') }}<textarea name="note" maxlength="500" rows="2" placeholder="{{ t('request_note_hint') }}">{{ form_data.get('note','') }}</textarea></label>
+  <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('send') }}<span>{{ t('request_send') }}</span></button></div>
+</form>
+{% endblock %}

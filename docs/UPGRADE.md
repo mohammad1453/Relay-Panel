@@ -29,7 +29,7 @@ On the VPS, run the online installer. Relay is already installed, so it updates 
 bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
 ```
 
-It downloads the latest release, checks its SHA-256, makes another backup, stops only Relay, installs the new code, upgrades the database (to schema 4) and checks that Relay starts. 3X-UI is never stopped or changed. If anything fails, the previous version comes back automatically.
+It downloads the latest release, checks its SHA-256, makes another backup, stops only Relay, installs the new code, upgrades the database (to schema 5) and checks that Relay starts. 3X-UI is never stopped or changed. If anything fails, the previous version comes back automatically.
 
 <details><summary>Without the online installer</summary>
 
@@ -69,6 +69,10 @@ If you set up Nginx with `--domain`, also add `proxy_set_header X-Forwarded-For 
 - Customers that were edited directly in 3X-UI show up under **Needs attention** with a table of what changed. Press **Accept 3X-UI values** to keep what 3X-UI has, or **Remove customer**.
 - Customers stuck in "setting up" whose client no longer exists in 3X-UI are removed after about 1–2 minutes, and their data goes back to the reseller's plan.
 - To delete a test reseller, open it, go to **Danger zone** and press **Delete reseller and customers** (press twice to confirm). This removes its customers from 3X-UI too.
+
+## Telegram bot (1.1.0)
+
+To get alerts in Telegram, follow [TELEGRAM.md](TELEGRAM.md). Nothing changes until you turn the bot on in **Settings**.
 
 ## If something goes wrong
 

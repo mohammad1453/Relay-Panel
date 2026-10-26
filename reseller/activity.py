@@ -14,7 +14,7 @@ TECHNICAL = {'customer_create_reserved', 'customer_update_reserved', 'customer_d
 # Groups for the activity filter.
 CATEGORIES = {
     'customers': ('customer_%', 'bulk_%'),
-    'plan': ('grant%', 'reseller_%'),
+    'plan': ('grant%', 'reseller_%', 'request_%'),
     'signin': ('login', 'logout', 'password_%', 'bootstrap'),
     'system': ('inbound_removed', 'sync', 'restore_unlock', 'customer_remote_missing', 'customer_removed_during_setup'),
 }
@@ -159,6 +159,17 @@ def describe(e, names, date):
                        (f" — {data.get('done', 0)} changed, {data.get('skipped', 0)} skipped, {data.get('failed', 0)} failed", False)], 'server'
         tone = 'danger' if data.get('failed') else 'success'
         link = f"/jobs/{data.get('job')}" if data.get('job') else None
+    elif action == 'request_created':
+        parts, icon, tone = [who, (f" asked for {gb(data.get('volume'))} more data" + (f" and {data.get('days')} days" if data.get('days') else ''), False)], 'send', 'info'
+        link = '/attention'
+    elif action in ('request_approved', 'request_declined'):
+        verb = ' approved ' if action == 'request_approved' else ' declined '
+        parts, icon = [who, (verb + f"a request for {gb(data.get('volume'))}", False)], 'send'
+        tone = 'success' if action == 'request_approved' else 'warning'
+    elif action == 'telegram_linked':
+        parts, icon = [who, (' connected Telegram', False)], 'send'
+    elif action == 'telegram_unlinked':
+        parts, icon = [who, (' disconnected Telegram', False)], 'send'
     elif action == 'settings_update':
         parts, icon = [who, (' changed the ', False), (str(e['subject']), True), (' setting', False)], 'key'
     elif action == 'sync':

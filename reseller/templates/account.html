@@ -21,6 +21,31 @@
       <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
     </form>
   </section>
+  <section class="card stack">
+    <header class="card-head"><h2>{{ ui.icon('send') }} Telegram</h2>{% if tg_link %}<span class="tag tag-success">Connected</span>{% endif %}</header>
+    {% if not tg_ready %}
+    <p class="muted">{{ 'Turn on the Telegram bot under Settings first.' if user.role=='admin' else 'The admin has not turned on the Telegram bot yet.' }}</p>
+    {% elif tg_code %}
+    <p>Open this link in Telegram and press <b>Start</b>. It works for 15 minutes.</p>
+    {% if tg_username %}<a class="btn btn-primary" href="https://t.me/{{ tg_username }}?start={{ tg_code }}" target="_blank" rel="noopener">{{ ui.icon('send') }}<span>Open @{{ tg_username }}</span></a>{% endif %}
+    <p class="muted">Or send this to the bot: <code>/start {{ tg_code }}</code></p>
+    <a class="link-sm" href="/account">I've done it – refresh</a>
+    {% elif tg_link %}
+    <p class="muted">Messages go to <b>{{ tg_link.name or 'your Telegram' }}</b> since {{ date(tg_link.linked) }}.</p>
+    <form method="post" action="/account/telegram/prefs" class="stack">
+      {{ ui.csrf_field() }}
+      <span class="muted">Tell me about:</span>
+      {% for key,label,default in tg_pref_labels %}
+      <label class="switch switch-sm"><input type="checkbox" name="pref" value="{{ key }}" {{ 'checked' if tg_prefs.get(key) }}><span class="switch-track"></span><span>{{ label }}</span></label>
+      {% endfor %}
+      <div class="actions-end"><button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
+    </form>
+    <form method="post" action="/account/telegram/unlink">{{ ui.csrf_field() }}{{ ui.confirm_button('Disconnect Telegram', None, 'ghost btn-sm', 'x') }}</form>
+    {% else %}
+    <p class="muted">Get {{ 'alerts and approve requests' if user.role=='admin' else 'plan alerts, customer links and answers to your requests' }} in Telegram.</p>
+    <form method="post" action="/account/telegram/connect">{{ ui.csrf_field() }}<button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('send') }}<span>Connect Telegram</span></button></form>
+    {% endif %}
+  </section>
   <section class="card">
     <header class="card-head"><h2>{{ ui.icon('shield') }} Security tips</h2></header>
     <ul class="tips">

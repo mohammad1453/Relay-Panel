@@ -429,6 +429,13 @@ input[type="checkbox"] { width: auto; min-height: 0; accent-color: var(--primary
 .tech summary { color: var(--muted); font-size: 12px; cursor: pointer; }
 .tech code { display: block; margin-top: 6px; }
 
+/* ---------- Requests ---------- */
+.tone-border-info { border-left-color: var(--info); }
+.request-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.request-form .field { margin: 0; width: 150px; }
+.request-form .field.grow { flex: 1; min-width: 200px; }
+.narrow-card { max-width: 620px; }
+
 /* ---------- Bulk changes ---------- */
 .check-col { width: 1%; padding-right: 0 !important; }
 .check-col input, .table input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; cursor: pointer; }

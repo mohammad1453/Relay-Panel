@@ -191,6 +191,23 @@ MESSAGES = {
     'bulk_confirming': '3X-UI is confirming', 'bulk_interrupted': 'not changed (Relay restarted)',
     'add_to_customers': 'Add to customers', 'remove_from_customers': 'Remove from customers',
 
+    # ----- Requests and Telegram
+    'request_title': 'Request more data', 'request_hint': 'Ask the admin to add data to your plan, and more days if you need them. You get an answer here and in Telegram.',
+    'request_volume': 'How much data', 'request_days': 'Extra days', 'request_days_hint': '0 keeps the current end date.',
+    'request_note_hint': 'Optional, e.g. "many new customers this month"', 'request_send': 'Send request',
+    'request_sent': 'Request sent. The admin has been notified.', 'request_pending': 'You already have a request waiting for the admin.',
+    'request_decided': 'This request was already answered.', 'request_waiting': 'Your request for {gb} is waiting for the admin.',
+    'request_was_approved': 'Your request for {gb} was approved.', 'request_was_declined': 'Your request for {gb} was declined.',
+    'request_asks': 'asks for more data', 'request_tag': 'Request', 'request_plan_now': 'Plan now', 'request_no_plan': 'No active plan; approving starts a new one.',
+    'request_answer': 'Message to the reseller (optional)', 'request_answer_hint': 'e.g. "Approved for this month"',
+    'request_approve': 'Approve', 'request_decline': 'Decline',
+    'request_approved_msg': 'Request approved; the plan was topped up.', 'request_declined_msg': 'Request declined.',
+    'telegram_off': 'The Telegram bot is turned off. The admin can turn it on under Settings.',
+    'telegram_unreachable': 'Relay cannot reach Telegram with this token. Check the token, or set a proxy if Telegram is blocked on this server.',
+    'telegram_not_linked': 'Connect your own Telegram on the Account page first.', 'telegram_bad_token': 'This does not look like a bot token. It looks like 123456789:AAE…',
+    'telegram_bad_proxy': 'The proxy must start with socks5://, http:// or https://.', 'telegram_unlinked': 'Telegram disconnected.',
+    'telegram_test_sent': 'Test message sent. Check Telegram.',
+
     # ----- Change (operation) kinds
     'op_create': 'Create', 'op_update': 'Edit', 'op_delete': 'Delete',
 }
