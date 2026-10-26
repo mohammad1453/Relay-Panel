@@ -182,3 +182,38 @@ def test_deleted_customer_name_can_be_reused(setup):
     again = sale(service, actor, sub_id='custom-sub-id')
     assert customer(db, again['customer_id'])['status'] == 'active'
     assert customer(db, op['customer_id'])['email'].startswith('customer-one~deleted-')
+
+
+def test_admin_creates_customer_with_relaypanel_group(setup):
+    _, panel, db, service, admin, actor, _ = setup
+    op = sale(service, admin, email='admin-customer', volume='750', inbounds=[1, 2])
+    assert db.one('SELECT status FROM operations WHERE id=?', (op['id'],))['status'] == 'committed'
+    record = panel.rows['admin-customer']
+    assert record['group'] == 'RelayPanel' and record['totalGB'] == 750 * 1024**3
+    assert op['grant_id'] is None and op['charge'] == 0
+    assert not db.one("SELECT 1 x FROM ledger WHERE customer_id=?", (op['customer_id'],))
+    service.refresh()
+    assert customer(db, op['customer_id'])['issue'] == ''
+    update = service.reserve(admin, form(email='admin-customer', volume='5', inbounds=[1]), str(uuid.uuid4()), 'update', op['customer_id'])
+    service.execute(update['id'])
+    assert db.one('SELECT status FROM operations WHERE id=?', (update['id'],))['status'] == 'committed'
+    assert panel.rows['admin-customer']['inboundIds'] == [1]
+    # A reseller cannot see or touch it, and a reseller cannot take the admin group as tag.
+    with pytest.raises(RuleError):
+        service.reserve(actor, {}, str(uuid.uuid4()), 'delete', op['customer_id'])
+    with pytest.raises(RuleError):
+        service.reseller(admin, 'sneaky', 'A-long-test-password!', 'relaypanel', 10, now() + 86400, [1])
+    delete = service.reserve(admin, {}, str(uuid.uuid4()), 'delete', op['customer_id'])
+    service.execute(delete['id'])
+    assert 'admin-customer' not in panel.rows
+
+
+def test_admin_customer_failed_create_can_be_retried(setup):
+    _, panel, db, service, admin, actor, _ = setup
+    panel.mode = 'unavailable'
+    op = sale(service, admin, email='admin-retry')
+    panel.mode = 'ok'
+    assert db.one('SELECT status FROM operations WHERE id=?', (op['id'],))['status'] == 'failed'
+    retry = service.retry_unsent(admin, op['id'], str(uuid.uuid4()))
+    service.execute(retry['id'])
+    assert db.one('SELECT status FROM operations WHERE id=?', (retry['id'],))['status'] == 'committed'

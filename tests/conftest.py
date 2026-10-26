@@ -45,6 +45,8 @@ class Panel:
                 return self.response()
             if self.mode=='unavailable':
                 raise httpx.ConnectTimeout('fixture')
+            if path=='setting/defaultSettings':
+                return self.response({'subEnable':True,'subURI':'https://panel-sub.invalid:2096/sub/'})
             if path=='server/status':
                 return self.response({'panelVersion':'3.11.0'})
             if path=='inbounds/list':
@@ -185,9 +187,11 @@ class ClassicPanel:
                 return httpx.Response(401)
             if not self.logged_in:
                 return httpx.Response(307,headers={'Location':'/'})
+            if path.endswith('/panel/setting/defaultSettings'):
+                return self.response({'subEnable':True,'subURI':'http://classic-sub.invalid:2096/sub/'})
             api=path.split('/panel/api/')[-1]
             form=dict(httpx.QueryParams(request.content.decode())) if request.content else {}
-            if api in ('server/status','clients/list') or api.startswith('clients/'):
+            if api in ('server/status','clients/list','setting/defaultSettings') or api.startswith('clients/'):
                 return httpx.Response(404,text='404 page not found')
             if api=='inbounds/list':
                 rows=[]

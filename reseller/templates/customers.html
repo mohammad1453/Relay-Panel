@@ -4,7 +4,7 @@
 {% block body %}
 <div class="page-head">
   <div><h1>{{ t('customers') }}</h1><p class="muted">{% if user.role=='admin' %}All customers of all resellers.{% else %}Everyone you sold a package to.{% endif %}</p></div>
-  {% if user.role=='reseller' and writable %}<div class="actions-row"><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
+  {% if user.role=='admin' or writable %}<div class="actions-row"><a class="btn btn-primary" href="/customers/new">{{ ui.icon('plus') }}<span>{{ t('new_customer') }}</span></a></div>{% endif %}
 </div>
 <section class="card card-flush">
   <div class="toolbar">
@@ -62,7 +62,7 @@
   {% elif any_customers %}
   {{ ui.empty('search', t('no_results')) }}
   {% else %}
-  {{ ui.empty('customers', t('no_customers'), '/customers/new' if user.role=='reseller' and writable else None, t('new_customer')) }}
+  {{ ui.empty('customers', t('no_customers'), '/customers/new' if user.role=='admin' or writable else None, t('new_customer')) }}
   {% endif %}
 </section>
 {% endblock %}

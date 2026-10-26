@@ -4,7 +4,7 @@
 {% block body %}
 <div class="page-head">
   <div><h1>{{ t('edit')+' '+display_name(customer.email) if customer else t('new_customer') }}</h1>
-  <p class="muted">{{ 'Change data, time or inbounds. Only the extra data you add is taken from your plan.' if customer else 'Fill in the details and press Create. The customer is ready in a few seconds.' }}</p></div>
+  <p class="muted">{% if admin_owned %}{{ 'Admin customer: no plan limit. In 3X-UI its group is RelayPanel.' }}{% elif customer %}Change data, time or inbounds. Only the extra data you add is taken from your plan.{% else %}Fill in the details and press Create. The customer is ready in a few seconds.{% endif %}</p></div>
   <div class="actions-row"><a class="btn btn-ghost" href="{{ '/customers/'+customer.id|string if customer else '/customers' }}">{{ t('cancel') }}</a></div>
 </div>
 <form method="post" class="form-layout" id="customer-form" novalidate>
@@ -31,7 +31,7 @@
       <header class="card-head"><h2>{{ ui.icon('data') }} {{ t('data_and_time') }}</h2></header>
       <label class="field">{{ t('volume') }}
         <span class="input-suffix"><input id="customer-volume" name="volume" type="number" inputmode="decimal" min="0.01" max="1000000" step="0.01" required value="{{ v.volume }}"
-          data-quota-gb="{{ quota_remaining }}" data-current-gb="{{ (customer.package/1073741824) if customer else 0 }}" {{ ui.invalid('volume') }}><span>GB</span></span>
+          data-quota-gb="{{ '' if admin_owned else quota_remaining }}" data-current-gb="{{ (customer.package/1073741824) if customer else 0 }}" {{ ui.invalid('volume') }}><span>GB</span></span>
         <span class="quick">{% for n in quick_volumes %}<button type="button" class="chip" data-fill="customer-volume" data-value="{{ n }}">{{ n }} GB</button>{% endfor %}</span>
         {{ ui.field_error('volume') }}
         <p class="field-error" id="quota-error" hidden>{{ t('insufficient_quota') }}</p>
@@ -81,9 +81,15 @@
     <section class="card summary">
       <h2>Summary</h2>
       <dl class="kv">
+        {% if admin_owned %}
+        <div><dt>{{ t('owner') }}</dt><dd><b>{{ t('admin') }}</b></dd></div>
+        <div><dt>3X-UI group</dt><dd><code>RelayPanel</code></dd></div>
+        <div><dt>{{ t('plan') }}</dt><dd>No plan limit</dd></div>
+        {% else %}
         <div><dt>{{ t('quota_available') }}</dt><dd><b>{{ number(quota_remaining|round(2)) }} GB</b></dd></div>
         <div><dt>{{ 'Extra data needed' if customer else 'This customer' }}</dt><dd><b id="summary-cost">—</b></dd></div>
         <div><dt>{{ t('remaining_after') }}</dt><dd><b id="summary-left">—</b></dd></div>
+        {% endif %}
         {% if plan %}<div><dt>{{ t('plan_expires') }}</dt><dd>{{ date(plan.expires) }}</dd></div>{% endif %}
       </dl>
       <button class="btn btn-primary btn-block" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') if customer else t('create') }}</span></button>

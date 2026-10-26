@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import activity, __version__
+from .links import label_links
 from .config import Config
 from .db import Database, now, audit
 from .domain import (Service, RuleError, GIB, PROTOCOLS, DRIFT_ISSUES, active_grant, owned, volume,
@@ -178,7 +179,9 @@ def create_app(config=None, remote=None, background=True):
     def render(request,name,status=200,**context):
         user=request.state.user
         owner_id=(context.get('customer') or {}).get('user_id') or (user or {}).get('id')
-        writable=bool(owner_id and db.one('SELECT id FROM grants WHERE user_id=? AND closed=0 AND starts<=? AND expires>?',(owner_id,now(),now())))
+        owner_row=db.one('SELECT role FROM users WHERE id=?',(owner_id,)) if owner_id else None
+        # Admin-owned customers have no plan, so they are always editable.
+        writable=bool(owner_row and (owner_row['role']=='admin' or db.one('SELECT id FROM grants WHERE user_id=? AND closed=0 AND starts<=? AND expires>?',(owner_id,now(),now()))))
         message=request.query_params.get('message','')
         error=request.query_params.get('error','')
         def link(**changes):
@@ -713,7 +716,8 @@ def create_app(config=None, remote=None, background=True):
     def customer_form_page(request,user,customer=None,status=200,form_data=None,**context):
         """The create/edit form, with current values or what the user just typed."""
         owner=customer['user_id'] if customer else user['id']
-        plan=current_plan(owner)
+        admin_owned=db.one('SELECT role FROM users WHERE id=?',(owner,))['role']=='admin'
+        plan=None if admin_owned else current_plan(owner)
         quota_remaining=max(0,plan['allowance']-plan['sold']-plan['reserved'])/GIB if plan else 0
         p=json.loads(customer['payload']) if customer else {}
         if customer and customer['remote_expiry'] and customer['remote_expiry']>0:
@@ -727,7 +731,7 @@ def create_app(config=None, remote=None, background=True):
             values.update({k:v for k,v in form_data.items() if k!='inbounds'})
             selected=[int(i) for i in form_data.get('inbounds',[]) if str(i).isdigit()]
         single=bool(getattr(remote,'single_inbound',False))
-        return render(request,'customer_form.html',status=status,customer=customer,p=p,v=values,inbounds=allowed(owner),selected=selected,single_inbound=single,
+        return render(request,'customer_form.html',status=status,customer=customer,p=p,v=values,inbounds=allowed(None if admin_owned else owner),selected=selected,single_inbound=single,admin_owned=admin_owned,
                       quota_remaining=quota_remaining,plan=plan,**context)
 
     def read_customer_form(form):
@@ -763,17 +767,14 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/customers/new')
     def customer_new(request:Request):
         user=require(request)
-        if user['role']!='reseller':
-            raise RuleError('forbidden',403)
-        with db.transaction() as conn:
-            active_grant(conn,user['id'])
+        if user['role']=='reseller':
+            with db.transaction() as conn:
+                active_grant(conn,user['id'])
         return customer_form_page(request,user)
 
     @app.post('/customers/new')
     async def customer_create(request:Request):
         user=require(request)
-        if user['role']!='reseller':
-            raise RuleError('forbidden',403)
         form=await request.form()
         values,data=read_customer_form(form)
         data['email']=values['email']
@@ -863,6 +864,22 @@ def create_app(config=None, remote=None, background=True):
         await run_in_threadpool(service.accept_remote,user,cid)
         return redirect(back(request,f'/customers/{cid}'),'accepted')
 
+    def public_subscription_base(base):
+        """3X-UI builds the address from how Relay reached it; replace a loopback host
+        (Relay talks to 3X-UI on 127.0.0.1) with the public one customers can reach."""
+        try:
+            parts=urlsplit(base)
+        except ValueError:
+            return base
+        if parts.hostname not in ('127.0.0.1','localhost','::1'):
+            return base
+        public=config.link_host or urlsplit(config.origin).hostname
+        if not public or public in ('127.0.0.1','localhost','::1'):
+            return base
+        host=f'[{public}]' if ':' in public else public
+        netloc=host+(f':{parts.port}' if parts.port else '')
+        return parts._replace(netloc=netloc).geturl()
+
     def checked_links(user,cid):
         c=customer_view(user,cid)
         if c['status']!='active':
@@ -888,8 +905,14 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/customers/{cid}/links')
     def links(request:Request,cid:int):
         c,links=checked_links(require(request),cid)
-        subscription_link=config.sub_url.rstrip('/')+'/'+quote(c['sub_id'],safe='') if config.sub_url else ''
-        items=[{'uri':link,'name':(link.rsplit('#',1)[-1] if '#' in link else link.split('://',1)[0]).replace('%20',' ')} for link in links]
+        # XUI_SUB_URL wins when set; otherwise use the subscription address 3X-UI itself shows.
+        base=config.sub_url.rstrip('/')+'/' if config.sub_url else remote.subscription_base() if hasattr(remote,'subscription_base') else ''
+        if base and not base.endswith('/'):
+            base+='/'
+        base=public_subscription_base(base)
+        subscription_link=base+quote(c['sub_id'],safe='') if base else ''
+        inbounds=db.all('SELECT i.id,i.name,i.protocol,i.port,i.metadata FROM placements p JOIN inbounds i ON i.id=p.inbound_id WHERE p.customer_id=? ORDER BY i.id',(cid,))
+        items=label_links(links,inbounds,display_name(c['email']))
         return render(request,'links.html',customer=c,links=items,subscription_link=subscription_link)
 
     # ----- Activity ------------------------------------------------------------
