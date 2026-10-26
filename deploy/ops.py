@@ -33,6 +33,13 @@ ROOT=Path(__file__).resolve().parent.parent
 OWNED=(CODE,CONFIG,DATA,BACKUPS)
 
 
+def installed_version():
+    try:
+        return (CODE/'VERSION').read_text().strip()
+    except OSError:
+        return 'unknown (before 1.0.0)'
+
+
 def run(args,check=True,**kwargs):
     return subprocess.run([str(a) for a in args],check=check,text=True,**kwargs)
 
@@ -67,6 +74,45 @@ def config_read():
     if Path(result.get('APP_DB','')).resolve()!=DATA/'app.db':
         fail('Configured database is outside this installation')
     return result
+
+
+LOOPBACK=('localhost','127.0.0.1','::1')
+
+
+def is_this_machine(host):
+    """True when host resolves to an address of this VPS itself (a public or private
+    interface address, not loopback). Binding only succeeds for local addresses."""
+    try:
+        infos=socket.getaddrinfo(host,None)
+    except OSError:
+        return False
+    for family,_,_,_,address in infos:
+        try:
+            with socket.socket(family,socket.SOCK_DGRAM) as probe:
+                probe.bind((address[0],0))
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def normalize_master_url(url):
+    """Return (url, link_host) for the 3X-UI address the operator typed.
+
+    When 3X-UI runs on this same VPS over plain HTTP (for example
+    http://203.0.113.5:2052/x-ui/), Relay talks to it on 127.0.0.1 instead:
+    the traffic never leaves the server and plain HTTP stays safe. The public
+    host is kept as XUI_LINK_HOST so generated links still show it."""
+    from urllib.parse import urlsplit,urlunsplit
+    url=url.strip()
+    if url and '://' not in url:
+        url='http://'+url
+    parsed=urlsplit(url)
+    path=(parsed.path or '/').rstrip('/')+'/'
+    if parsed.scheme=='http' and parsed.hostname and parsed.hostname not in LOOPBACK and is_this_machine(parsed.hostname):
+        port=f':{parsed.port}' if parsed.port else ''
+        return urlunsplit(('http','127.0.0.1'+port,path,parsed.query,parsed.fragment)),parsed.hostname
+    return urlunsplit((parsed.scheme,parsed.netloc,path,parsed.query,parsed.fragment)),''
 
 
 def port_free(port,public=False):
@@ -124,9 +170,11 @@ def mark(path,mode):
 def copy_source(source,destination):
     # Explicit allowlist excludes master reference checkout, local state and secrets.
     destination.mkdir(parents=True,exist_ok=True)
-    for name in ('reseller','deploy','docs','requirements.txt','requirements.lock','requirements-dev.txt','README.md','.env.example','install.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh'):
+    for name in ('reseller','deploy','docs','VERSION','requirements.txt','requirements.lock','requirements-dev.txt','README.md','.env.example','install.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh'):
         src=source/name
         if not src.exists():
+            if name=='VERSION':
+                continue  # releases before 1.0.0 had no VERSION file
             fail('Source package is incomplete: '+name)
         if src.is_symlink() or src.is_dir() and any(p.is_symlink() for p in src.rglob('*')):
             fail('Source symlinks are not allowed')
@@ -193,10 +241,19 @@ def install(args):
             print('WARNING: public HTTP sends Relay passwords, sessions and customer data without transport encryption.')
         elif not origin.startswith('https://'):
             fail('Use an HTTPS origin or explicitly choose --tunnel-http for SSH-tunnel-only access')
-        url=input('Existing 3X-UI base URL including its web path: ').strip()
+        print('3X-UI panel address, including its web path, as you open it in the browser.')
+        print('  Examples: http://127.0.0.1:2053/your-web-path/  or  https://panel.example.com:2053/your-web-path/')
+        typed=input('3X-UI panel address: ').strip()
+        url,link_host=normalize_master_url(typed)
+        if link_host:
+            print(f'3X-UI runs on this VPS: Relay will connect to it locally at {url}')
+            print(f'(links shown to customers keep using {link_host}).')
         parsed=urlsplit(url)
-        if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname or (parsed.scheme!='https' and not(parsed.scheme=='http' and parsed.hostname in ('localhost','127.0.0.1','::1'))):
-            fail('Master URL requires HTTPS, or HTTP on loopback, with no embedded credentials')
+        if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname:
+            fail('The 3X-UI address must not contain a username, password, query or fragment')
+        if parsed.scheme!='https' and not(parsed.scheme=='http' and parsed.hostname in LOOPBACK):
+            fail('3X-UI over plain HTTP only works when it runs on this same VPS (Relay then uses 127.0.0.1). '
+                 'For a 3X-UI on another server, use its https:// address.')
         original=input('Original panel SQLite paths (comma separated), or external for PostgreSQL: ').strip()
         if not original:
             fail('Inspect the original panel database configuration and rerun')
@@ -213,7 +270,7 @@ def install(args):
             fail('Master authentication is required')
         values={'APP_ENV':'public-http' if public_http else 'development' if tunnel_http else 'production','APP_ORIGIN':origin,'APP_BASE_PATH':base_path,'APP_DB':str(DATA/'app.db'),
                 'APP_PORT':str(args.port),'APP_TIMEZONE':'Asia/Tehran','XUI_DATABASE_PATHS':original,
-                'XUI_URL':url,'XUI_SUB_URL':sub_url,'XUI_TOKEN':token,'XUI_USERNAME':username,'XUI_PASSWORD':password,'SYNC_SECONDS':'30'}
+                'XUI_URL':url,'XUI_LINK_HOST':link_host,'XUI_SUB_URL':sub_url,'XUI_TOKEN':token,'XUI_USERNAME':username,'XUI_PASSWORD':password,'SYNC_SECONDS':'30'}
     # Ubuntu's apt hook may otherwise restart unrelated services automatically.
     package_env={**os.environ,'NEEDRESTART_MODE':'l','NEEDRESTART_SUSPEND':'1'}
     run(['apt-get','update'],env=package_env)
@@ -243,7 +300,7 @@ def install(args):
     if args.domain:
         configure_proxy(args,config)
     app('check',check=False)
-    print('Installed. Access:',config['APP_ORIGIN']+config.get('APP_BASE_PATH','')+'/')
+    print('Installed Relay',installed_version()+'. Access:',config['APP_ORIGIN']+config.get('APP_BASE_PATH','')+'/')
     if config.get('APP_ENV')=='development':
         print('SSH tunnel: ssh -L '+config['APP_PORT']+':127.0.0.1:'+config['APP_PORT']+' YOUR_SSH_USER@YOUR_VPS')
     print('Configuration: /etc/3xui-reseller/app.env; service: xui-reseller.service. Original panel untouched.')
@@ -381,7 +438,7 @@ def update(args):
             run(['systemctl','start',SERVICE],check=False)
             print('Upgrade failed. Previous source and database restored. Verify service health; backup:',rollback)
             raise
-    print('Upgrade complete. Only xui-reseller.service was restarted.')
+    print('Upgrade to Relay',installed_version(),'complete. Only xui-reseller.service was restarted.')
 
 
 def configure_proxy(args,config):
@@ -466,6 +523,7 @@ def main():
         elif args.command=='uninstall':uninstall(args)
         else:
             require_root();safe_paths()
+            print('Relay version:',installed_version())
             run(['systemctl','status',SERVICE,'--no-pager'],check=False)
             config=config_read();health(int(config['APP_PORT']))
             app('check')

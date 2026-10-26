@@ -74,7 +74,7 @@ class Config:
             if url.username or url.password or url.query or url.fragment or not url.hostname:
                 raise ValueError("Invalid XUI_URL")
             if url.scheme != "https" and not (url.scheme == "http" and url.hostname in ("localhost", "127.0.0.1", "::1")):
-                raise ValueError("XUI_URL requires HTTPS except on loopback")
+                raise ValueError("XUI_URL requires HTTPS. If 3X-UI runs on this same VPS, use http://127.0.0.1:PORT/WEB-PATH/ instead of its public address")
         if strict and (not self.xui_url or not (self.xui_token or self.xui_username and self.xui_password)):
             raise ValueError("Configure master URL and authentication")
         if self.sub_url:

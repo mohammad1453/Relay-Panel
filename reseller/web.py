@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import activity
+from . import activity, __version__
 from .config import Config
 from .db import Database, now, audit
 from .domain import (Service, RuleError, GIB, PROTOCOLS, DRIFT_ISSUES, active_grant, owned, volume,
@@ -199,7 +199,7 @@ def create_app(config=None, remote=None, background=True):
             'error':error if known(error) else ('error' if error else ''),'PROTOCOLS':PROTOCOLS,'base_path':config.base_path,
             'form_data':{},'field_errors':{},'page_error':'','sync':sync_status() if user else None,
             'attention_total':attention_count() if user and user['role']=='admin' else 0,
-            'quick_volumes':QUICK_VOLUMES,'quick_days':QUICK_DAYS,'link':link,
+            'version':__version__,'quick_volumes':QUICK_VOLUMES,'quick_days':QUICK_DAYS,'link':link,
         }
         base.update(context)
         return templates.TemplateResponse(request=request,name=name,context=base,status_code=status)
@@ -366,7 +366,7 @@ def create_app(config=None, remote=None, background=True):
     @app.get('/healthz')
     def health():
         db.one('SELECT 1 AS ok')
-        return {'status':'ok','schema':3}
+        return {'status':'ok','schema':3,'version':__version__}
 
     # ----- Sign in and account -----------------------------------------------
 

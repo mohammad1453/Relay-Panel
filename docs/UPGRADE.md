@@ -21,31 +21,28 @@ scp root@VPS_IP:/var/backups/3xui-reseller/relay-20261025T120000000000Z.tar.gz .
 
 Keep this file safe. It contains your Relay database and settings, including the 3X-UI login.
 
-## 2. Build the release on your computer
+## 2. Update
 
-In a copy of this repository on the new version:
-
-```bash
-python3 tools/package_release.py
-```
-
-It prints the path of `relay-release.tar.gz` and a **SHA256** line. Copy the archive to the VPS:
+On the VPS, run the online installer. Relay is already installed, so it updates instead of installing:
 
 ```bash
-scp relay-release.tar.gz root@VPS_IP:/root/
+bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
 ```
 
-## 3. Update on the VPS
+It downloads the latest release, checks its SHA-256, makes another backup, stops only Relay, installs the new code, upgrades the database (to schema 3) and checks that Relay starts. 3X-UI is never stopped or changed. If anything fails, the previous version comes back automatically.
 
-Use the SHA256 printed in step 2:
+<details><summary>Without the online installer</summary>
+
+Download `relay-panel-vX.Y.Z.tar.gz` and its `.sha256` from the [releases page](https://github.com/mohammad1453/Relay-Panel/releases) to `/root/`, then:
 
 ```bash
-sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-release.tar.gz --sha256 PASTE_THE_SHA256_HERE
+cd /root && sha256sum -c relay-panel-vX.Y.Z.tar.gz.sha256
+sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-panel-vX.Y.Z.tar.gz --sha256 "$(cut -d' ' -f1 relay-panel-vX.Y.Z.tar.gz.sha256)"
 ```
 
-The updater makes another backup, stops only Relay, installs the new code, upgrades the database (to schema 3) and checks that Relay starts. 3X-UI is never stopped or changed.
+</details>
 
-## 4. Settings to add
+## 3. Settings to add
 
 Edit `/etc/3xui-reseller/app.env` and add or change:
 
@@ -64,7 +61,7 @@ sudo systemctl restart xui-reseller.service
 
 If you set up Nginx with `--domain`, also add `proxy_set_header X-Forwarded-For $remote_addr;` inside the `location /` block of `/etc/nginx/conf.d/3xui-reseller.conf`, then run `sudo nginx -t && sudo systemctl reload nginx`.
 
-## 5. What happens to existing customers
+## 4. What happens to existing customers
 
 - Within about 30 seconds of the first sync, inbounds you deleted in 3X-UI are removed from Relay. Customers that were only "unavailable" because of a deleted inbound go back to normal by themselves.
 - Customers that were edited directly in 3X-UI show up under **Needs attention** with a table of what changed. Press **Accept 3X-UI values** to keep what 3X-UI has, or **Remove customer**.

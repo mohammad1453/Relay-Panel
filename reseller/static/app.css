@@ -436,6 +436,7 @@ input[type="checkbox"] { width: auto; min-height: 0; accent-color: var(--primary
 .auth-brand { display: flex; align-items: center; gap: 12px; }
 .auth-brand div { display: flex; flex-direction: column; line-height: 1.25; }
 .auth-brand b { font-size: 17px; }
+.version-note { text-align: center; font-size: 12px; margin: 0; }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {

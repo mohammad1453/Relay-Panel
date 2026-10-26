@@ -1,0 +1,64 @@
+# Changelog
+
+All notable changes to Relay are listed here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Relay uses
+[Semantic Versioning](https://semver.org/): see [docs/RELEASING.md](docs/RELEASING.md).
+
+## [Unreleased]
+
+## [1.0.0] - 2026-10-26
+
+First stable release. Update an existing 0.1.0 install in place with the online
+installer or `update.sh`; data and settings are kept and the database is upgraded
+to schema 3 automatically.
+
+### Added
+- One-line online installer and updater (`install-online.sh`) that downloads a
+  published GitHub release and checks its SHA-256.
+- Version number shown in the panel, `/healthz` and `status.sh`; GitHub Actions
+  build and publish releases from version tags.
+- **Needs attention** page for the admin: plain explanations and safe actions
+  (Check again, Send again, Mark as done, Accept 3X-UI values, Remove customer)
+  with a field-by-field comparison of changes made directly in 3X-UI.
+- Delete a reseller together with all of its customers.
+- **Activity** page with readable sentences, filters and per-reseller view.
+- **Sync now** button and a sync status indicator for admins and resellers.
+- `XUI_SUB_URL` setting for the public subscription link.
+
+### Changed
+- New interface in the style of 3X-UI: dark and light themes, mobile layout,
+  usage bars, filter chips and quick-pick buttons.
+- English only; the Persian interface and language switch were removed.
+- Errors are shown on the same page, next to the field that caused them, and
+  forms keep what was typed. Inline "click again to confirm" replaces pop-ups.
+- Sync with 3X-UI every 30 seconds (was 120), quick re-checks every 10 seconds
+  for customers being set up, and back-off while 3X-UI is unreachable.
+- The installer accepts the 3X-UI address as you open it in the browser. When
+  3X-UI runs on the same VPS over plain HTTP, Relay automatically connects to it
+  on `127.0.0.1` and keeps the public host for customer links.
+
+### Fixed
+- Inbounds deleted in 3X-UI were never removed from Relay.
+- Customers showed as unavailable after one of their inbounds was deleted in 3X-UI,
+  and then could not be edited or deleted.
+- A customer deleted in 3X-UI while still being set up stayed in Relay forever.
+- Changes waiting on a 3X-UI node could stay pending forever.
+- Deleted customers blocked their name, subscription ID and UUID from reuse.
+- Filter, paging and tab links broke when Relay runs under a web path.
+- The background sync and a manual sync could run at the same time.
+
+### Security
+- Logout now ends the server session when a web path is configured.
+- Login rate limits apply per visitor behind the Nginx proxy, and a few wrong
+  passwords can no longer lock the admin out for everyone.
+- Public HTTP mode keeps all production configuration checks.
+- Anonymous requests can no longer grow the database without limit.
+- Removed a hard-coded third-party subscription domain.
+
+## [0.1.0] - 2026-10-14
+
+Initial public version.
+
+[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/mohammad1453/Relay-Panel/releases/tag/v1.0.0
+[0.1.0]: https://github.com/mohammad1453/Relay-Panel/commit/3ce308d

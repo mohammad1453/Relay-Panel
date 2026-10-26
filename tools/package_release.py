@@ -1,11 +1,20 @@
-"""Create an application-only source archive; prints a digest, never packages secrets."""
+"""Create an application-only release archive; prints a digest, never packages secrets.
+
+Output: dist/relay-panel-v<VERSION>.tar.gz and a matching .sha256 file.
+The GitHub release workflow runs this same script, so local and published
+archives have the same layout.
+"""
 import hashlib
 import tarfile
 from pathlib import Path
 
 root=Path(__file__).resolve().parent.parent
-output=root/'relay-release.tar.gz'
-names=['reseller','deploy','docs','tools','tests','requirements.txt','requirements.lock','requirements-dev.txt','README.md','.env.example','install.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh']
+version=(root/'VERSION').read_text(encoding='ascii').strip()
+dist=root/'dist'
+dist.mkdir(exist_ok=True)
+output=dist/f'relay-panel-v{version}.tar.gz'
+names=['reseller','deploy','docs','tools','tests','VERSION','CHANGELOG.md','requirements.txt','requirements.lock','requirements-dev.txt',
+       'README.md','.env.example','install.sh','install-online.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh']
 with tarfile.open(output,'w:gz') as archive:
     for name in names:
         entry=root/name

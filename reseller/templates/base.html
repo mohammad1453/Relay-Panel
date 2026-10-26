@@ -25,7 +25,7 @@
     </nav>
     <div class="sidebar-user">
       <span class="avatar">{{ user.username[:1]|upper }}</span>
-      <div class="sidebar-user-text"><b>{{ user.username }}</b><small>{{ t('admin') if user.role=='admin' else t('reseller') }}</small></div>
+      <div class="sidebar-user-text"><b>{{ user.username }}</b><small>{{ t('admin') if user.role=='admin' else t('reseller') }} · v{{ version }}</small></div>
       <form method="post" action="/logout">{{ ui.csrf_field() }}<button class="btn-icon" title="{{ t('logout') }}" aria-label="{{ t('logout') }}">{{ ui.icon('logout') }}</button></form>
     </div>
   </aside>

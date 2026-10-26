@@ -10,3 +10,6 @@ backups/
 *.tar.gz
 /RelayPanel.zip
 .coverage
+relay-release.tar.gz.sha256
+relay-panel-*.tar.gz.sha256
+dist/

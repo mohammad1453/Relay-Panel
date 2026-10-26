@@ -17,18 +17,24 @@ For a differently named or containerized panel inspect the corresponding service
 
 ## Transfer and install
 
-There is no published Git repository or release URL yet. Upload the supplied project directory with your SSH/SFTP client to `~/relay-source`. Exclude `.venv`, `.reference`, `.env`, `state` and backups. Alternatively create a verified release archive with `python tools/package_release.py` on your development machine and transfer that archive plus its hash via a trusted channel.
+The quickest way is the online installer. It downloads the latest release from [GitHub Releases](https://github.com/mohammad1453/Relay-Panel/releases), checks its SHA-256 and runs `install.sh`. Every option of `install.sh` can be added at the end. Add `--version vX.Y.Z` for a specific release.
 
 ```bash
-mkdir -p ~/relay-source
-# After uploading relay-release.tar.gz and its .sha256 file to your home directory:
-cd ~
-sha256sum -c relay-release.tar.gz.sha256
-tar -xzf relay-release.tar.gz -C ~/relay-source
+bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
+```
+
+To install by hand instead, download `relay-panel-vX.Y.Z.tar.gz` and its `.sha256` from the release page (or build them with `python tools/package_release.py`):
+
+```bash
+mkdir -p ~/relay-source && cd ~
+sha256sum -c relay-panel-vX.Y.Z.tar.gz.sha256
+tar -xzf relay-panel-vX.Y.Z.tar.gz -C ~/relay-source
 cd ~/relay-source
 sudo bash ./install.sh --dry-run
 sudo bash ./install.sh
 ```
+
+**3X-UI on the same VPS:** enter its address the way you open it in the browser. If that is the public IP of this VPS with plain `http://`, the installer switches to `http://127.0.0.1:PORT/WEB-PATH/` (same port and web path) and stores the public host as `XUI_LINK_HOST`, so customer links keep showing it. Plain HTTP to 3X-UI is only allowed on 127.0.0.1; a 3X-UI on another server needs its `https://` address.
 
 The installer checks OS/architecture/systemd, existing services, conventional panel paths, listeners, application path ownership and space. It asks for the HTTPS application origin, master URL, original DB paths and master credentials before making installation changes. Passwords are hidden and never command-line arguments. It installs Python venv support, creates `xui-reseller`, installs the application, initializes its DB and prompts for the initial administrator username/password. Remember that password; it is not logged or saved in plaintext. First login requires changing it.
 
@@ -127,10 +133,16 @@ sudo -u xui-reseller .venv/bin/python -m reseller.manage unlock-restored --env /
 
 ## Updates and rollback
 
-Build a source release archive on the development machine using `python tools/package_release.py`. Transfer it safely; compare its printed SHA-256 against a trusted independently obtained value.
+Run the online installer again; on an installed system it updates to the latest release (or the one given with `--version`):
 
 ```bash
-sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-release.tar.gz --sha256 REPLACE_WITH_TRUSTED_64_HEX_SHA256
+bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
+```
+
+Or update from a release archive you downloaded or built with `python tools/package_release.py`:
+
+```bash
+sudo bash /opt/3xui-reseller/update.sh --archive /root/relay-panel-vX.Y.Z.tar.gz --sha256 SHA256_FROM_THE_RELEASE_PAGE
 ```
 
 The updater validates archive traversal and checksum, backs up DB/config, stops only Relay, installs code/dependencies, migrates and health-checks. On failure it restores prior code and DB/config automatically and restarts Relay. A restored DB is sales-locked pending operator review. Keep the previous release archive and pre-update backup for manual recovery: reinstall the old release into the dedicated code directory, restore its compatible backup, check health/reconcile, then unlock. Never run an older application against a newer schema.
