@@ -959,3 +959,155 @@ class Service:
             db.execute('UPDATE grants SET closed=1 WHERE user_id=?',(uid,))
             audit(db,actor['id'],'reseller_delete',user['username'])
         return 0
+
+    # ----- Bulk inbound changes -------------------------------------------------
+
+    BULK_ACTIONS = ('add', 'remove', 'move', 'enable', 'disable')
+
+    def plan_bulk(self, actor, customer_ids, action, inbound_ids):
+        """Work out, for each customer, the inbounds after the change, or why it is skipped.
+
+        Nothing is changed here; this is the preview shown before applying.
+        Returns a list of dicts: cid, email, owner, before, after, enable, skip (reason or '').
+        """
+        if action not in self.BULK_ACTIONS:
+            raise RuleError('invalid_input')
+        chosen = sorted({int(i) for i in inbound_ids})
+        inbounds = {r['id']: r for r in self.db.all('SELECT id,name,protocol,available FROM inbounds')}
+        if action in ('add', 'remove', 'move'):
+            if not chosen or any(i not in inbounds for i in chosen):
+                raise RuleError('no_inbound')
+            if action == 'move' and len({inbounds[i]['protocol'] for i in chosen}) != 1:
+                raise RuleError('mixed_protocols')
+            if action == 'move' and len(chosen) > 1 and getattr(self.remote, 'single_inbound', False):
+                raise RuleError('single_inbound')
+        plan = []
+        with self.db.transaction() as db:
+            users = {r['id']: r for r in db.execute('SELECT id,username,role,suspended FROM users').fetchall()}
+            pending = {r[0] for r in db.execute("SELECT customer_id FROM operations WHERE status IN ('reserved','sent','uncertain')")}
+            for cid in dict.fromkeys(int(c) for c in customer_ids):
+                row = db.execute('SELECT * FROM customers WHERE id=?', (cid,)).fetchone()
+                if not row or (actor['role'] != 'admin' and row['user_id'] != actor['id']):
+                    continue
+                owner = users.get(row['user_id'])
+                current = sorted(r[0] for r in db.execute('SELECT inbound_id FROM placements WHERE customer_id=?', (cid,)))
+                payload = json.loads(row['payload'])
+                item = {'cid': cid, 'email': row['email'], 'owner': owner['username'] if owner else '', 'before': current,
+                        'after': current, 'enable': None, 'skip': ''}
+                plan.append(item)
+                protocols = {inbounds[i]['protocol'] for i in current if i in inbounds}
+                admin_owned = owner and owner['role'] == 'admin'
+                if row['status'] != 'active':
+                    item['skip'] = 'bulk_not_active'
+                elif row['issue']:
+                    item['skip'] = 'bulk_attention'
+                elif cid in pending:
+                    item['skip'] = 'bulk_in_progress'
+                elif owner and owner['suspended']:
+                    item['skip'] = 'bulk_owner_suspended'
+                elif not admin_owned and not db.execute('SELECT 1 FROM grants WHERE user_id=? AND closed=0 AND starts<=? AND expires>?',
+                                                        (row['user_id'], now(), now())).fetchone():
+                    item['skip'] = 'bulk_plan_expired'
+                if item['skip']:
+                    continue
+                if action in ('enable', 'disable'):
+                    item['enable'] = action == 'enable'
+                    if bool(payload.get('enable', True)) == item['enable']:
+                        item['skip'] = 'bulk_already'
+                    continue
+                if action == 'add':
+                    usable = [i for i in chosen if not protocols or inbounds[i]['protocol'] in protocols]
+                    if not protocols and len({inbounds[i]['protocol'] for i in usable}) > 1:
+                        item['skip'] = 'mixed_protocols'
+                        continue
+                    if not usable:
+                        item['skip'] = 'bulk_different_protocol'
+                        continue
+                    after = sorted(set(current) | set(usable))
+                elif action == 'remove':
+                    after = sorted(set(current) - set(chosen))
+                    if after == current:
+                        item['skip'] = 'bulk_not_on_inbound'
+                        continue
+                    if not after:
+                        item['skip'] = 'bulk_last_inbound'
+                        continue
+                else:
+                    if protocols and inbounds[chosen[0]]['protocol'] not in protocols:
+                        item['skip'] = 'bulk_different_protocol'
+                        continue
+                    after = chosen
+                if after == current:
+                    item['skip'] = 'bulk_already'
+                    continue
+                if len(after) > 1 and getattr(self.remote, 'single_inbound', False):
+                    item['skip'] = 'single_inbound'
+                    continue
+                if any(not inbounds[i]['available'] for i in set(after) - set(current)):
+                    item['skip'] = 'inbound_unavailable'
+                    continue
+                if not admin_owned and any(not db.execute('SELECT 1 FROM permissions WHERE user_id=? AND inbound_id=?', (row['user_id'], i)).fetchone()
+                                           for i in set(after) - set(current)):
+                    item['skip'] = 'bulk_inbound_denied'
+                    continue
+                item['after'] = after
+        return plan
+
+    def create_bulk_job(self, actor, action, inbound_ids, plan, summary):
+        job_id = str(uuid.uuid4())
+        items = [{**item, 'state': 'skipped' if item['skip'] else 'waiting', 'reason': item['skip']} for item in plan]
+        skipped = sum(1 for i in items if i['state'] == 'skipped')
+        with self.db.transaction() as db:
+            db.execute("INSERT INTO jobs(id,actor,kind,summary,total,skipped,status,items,created,updated) VALUES(?,?,?,?,?,?,'running',?,?,?)",
+                       (job_id, actor['id'], action, summary, len(items), skipped, dumps(items), now(), now()))
+        return job_id
+
+    def run_bulk_job(self, job_id):
+        """Apply a bulk job customer by customer. Each change is a normal, verified edit."""
+        job = self.db.one('SELECT * FROM jobs WHERE id=?', (job_id,))
+        if not job or job['status'] != 'running':
+            return
+        actor = self.db.one('SELECT * FROM users WHERE id=?', (job['actor'],))
+        items = json.loads(job['items'])
+        for item in items:
+            if item['state'] != 'waiting':
+                continue
+            form = {'inbounds': item['after']}
+            if item.get('enable') is not None:
+                form['enable'] = item['enable']
+            try:
+                op = self.reserve(actor, form, str(uuid.uuid4()), 'update', item['cid'])
+                self.execute(op['id'])
+                result = self.db.one('SELECT status,diagnostic FROM operations WHERE id=?', (op['id'],))
+                if result['status'] == 'committed':
+                    item['state'] = 'done'
+                elif result['status'] in ('sent', 'uncertain'):
+                    item['state'], item['reason'] = 'done', 'bulk_confirming'
+                else:
+                    item['state'], item['reason'] = 'failed', result['diagnostic'] or 'error'
+            except (RuleError, RemoteError) as exc:
+                item['state'], item['reason'] = 'failed', exc.code
+            except Exception:
+                item['state'], item['reason'] = 'failed', 'error'
+            self._save_job(job_id, items, 'running')
+        self._save_job(job_id, items, 'finished')
+        done = sum(1 for i in items if i['state'] == 'done')
+        failed = sum(1 for i in items if i['state'] == 'failed')
+        with self.db.transaction() as db:
+            audit(db, actor['id'], 'bulk_inbounds', dumps({'job': job_id, 'kind': job['kind'], 'summary': job['summary'],
+                                                          'done': done, 'failed': failed, 'skipped': job['skipped']}))
+
+    def _save_job(self, job_id, items, status):
+        counts = {s: sum(1 for i in items if i['state'] == s) for s in ('done', 'skipped', 'failed')}
+        with self.db.transaction() as db:
+            db.execute('UPDATE jobs SET items=?,done=?,skipped=?,failed=?,status=?,updated=? WHERE id=?',
+                       (dumps(items), counts['done'], counts['skipped'], counts['failed'], status, now(), job_id))
+
+    def interrupt_jobs(self):
+        """After a restart, mark jobs that were cut off; their remaining customers were not changed."""
+        for job in self.db.all("SELECT id,items FROM jobs WHERE status='running'"):
+            items = json.loads(job['items'])
+            for item in items:
+                if item['state'] == 'waiting':
+                    item['state'], item['reason'] = 'skipped', 'bulk_interrupted'
+            self._save_job(job['id'], items, 'interrupted')

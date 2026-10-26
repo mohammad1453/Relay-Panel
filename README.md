@@ -12,6 +12,8 @@ Relay adds **resellers** to [3X-UI](https://github.com/MHSanaei/3x-ui). You give
 - **Resellers with plans:** data size, end date and allowed inbounds per reseller. Renew, change or suspend at any time.
 - **Customers:** create in a few clicks with data limit, fixed date or "days from first connection", note, and one or more inbounds. Subscription link and per-inbound config links with copy buttons.
 - **Stays in sync with 3X-UI** every 30 seconds: usage, online status and expiry. Inbounds or customers deleted in 3X-UI disappear from Relay too.
+- **Change many customers at once:** add, remove or move inbounds (or turn customers on/off) for selected customers or a whole filtered list, with a preview before anything changes.
+- **Settings page:** set your subscription address once (e.g. `https://sub.example.com/i/`); every customer gets their own link.
 - **Needs attention** page for the admin: anything Relay could not finish, explained in plain words with the right buttons. If someone edits a customer directly in 3X-UI, you see exactly what changed and can accept it with one click.
 - **Readable activity log** for admins and resellers ("You created customer ali-phone", "Inbound VMess WS was deleted in 3X-UI").
 - **Safe accounting:** quota is held while 3X-UI confirms a change and only counted once it is verified.

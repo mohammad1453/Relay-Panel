@@ -273,17 +273,6 @@ def test_subscription_link_uses_configured_url(client,setup):
     assert '1mo.us' not in response.text
 
 
-def test_subscription_link_explains_when_3xui_subscription_is_off(setup,monkeypatch):
-    config,_,_,service,_,actor,_=setup
-    op=sale(service,actor)
-    monkeypatch.setattr(service.remote,'subscription_base',lambda:'')
-    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
-        login(c)
-        response=c.get('/customers/'+str(op['customer_id'])+'/links')
-        assert response.status_code==200 and 'subscription service is off in 3X-UI' in response.text
-        assert 'id="subscription-link"' not in response.text
-
-
 def test_unknown_message_is_not_rendered(client):
     login(client)
     assert 'Call support at' not in client.get('/?message=Call+support+at+evil').text
@@ -386,18 +375,6 @@ def test_link_titles_use_inbound_and_customer_name(setup):
     assert items[1]['server']=='104.21.21.111:443' and items[0]['remark'].endswith('DE-ali')
 
 
-def test_links_page_titles_and_subscription_from_3xui(setup):
-    config,_,_,service,_,actor,_=setup
-    op=sale(service,actor,email='titled')
-    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
-        login(c)
-        page=c.get('/customers/'+str(op['customer_id'])+'/links').text
-        sub_id=setup[2].one('SELECT sub_id FROM customers WHERE id=?',(op['customer_id'],))['sub_id']
-        assert 'https://panel-sub.invalid:2096/sub/'+sub_id in page
-        assert 'Inbound 1 · titled' in page
-        assert page.index('Subscription link')<page.index('Single configs')
-
-
 def test_admin_creates_customer_from_the_web(client,setup):
     _,panel,db,_,_,_,_=setup
     token=login(client,'admin')
@@ -410,14 +387,44 @@ def test_admin_creates_customer_from_the_web(client,setup):
     assert '/customers/'+str(db.one("SELECT id FROM customers WHERE email='by-admin'")['id'])+'/edit' in detail
 
 
-def test_loopback_subscription_address_uses_public_host(setup,monkeypatch):
+def test_links_titles_and_subscription_first(client,setup):
+    _,_,db,service,_,actor,_=setup
+    op=sale(service,actor,email='titled')
+    login(client)
+    page=client.get('/customers/'+str(op['customer_id'])+'/links').text
+    sub_id=db.one('SELECT sub_id FROM customers WHERE id=?',(op['customer_id'],))['sub_id']
+    assert 'https://sub.example.invalid/i/'+sub_id in page
+    assert 'Inbound 1 · titled' in page
+    assert page.index('Subscription link')<page.index('Single configs')
+
+
+def test_no_subscription_address_shows_nothing(setup):
     config,_,_,service,_,actor,_=setup
-    op=sale(service,actor,email='public-sub')
-    monkeypatch.setattr(service.remote,'subscription_base',lambda:'http://127.0.0.1:2096/subpath/')
-    cfg=replace(config,sub_url='',origin='http://203.0.113.7:8095',base_path='/relay',public_http=True,xui_database_paths='/etc/x-ui/x-ui.db')
-    with TestClient(create_app(cfg,service.remote,background=False),base_url=cfg.origin) as c:
-        page=c.get('/relay/login')
-        token=re.search(r'name="csrf" value="([^"]+)"',page.text).group(1)
-        c.post('/relay/login',data={'csrf':token,'username':'reseller','password':'A-long-test-password!'})
-        text=c.get('/relay/customers/'+str(op['customer_id'])+'/links').text
-        assert 'http://203.0.113.7:2096/subpath/' in text and '127.0.0.1:2096' not in text
+    op=sale(service,actor)
+    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
+        login(c)
+        page=c.get('/customers/'+str(op['customer_id'])+'/links').text
+        assert 'id="subscription-link"' not in page and 'No subscription address is set yet' in page
+        assert 'panel-sub.invalid' not in page and '127.0.0.1' not in page
+        assert 'detail-sub-link' not in c.get('/customers/'+str(op['customer_id'])).text
+
+
+def test_admin_sets_subscription_address_in_settings(setup):
+    config,_,db,service,_,actor,_=setup
+    op=sale(service,actor)
+    sub_id=db.one('SELECT sub_id FROM customers WHERE id=?',(op['customer_id'],))['sub_id']
+    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
+        token=login(c,'admin')
+        response=c.post('/settings',data={'csrf':token,'sub_url':'not a url'})
+        assert response.status_code==400 and 'Enter a full address' in response.text
+        token=csrf(c,'/settings')
+        assert c.post('/settings',data={'csrf':token,'sub_url':'https://sub.1mo.us/i/'},follow_redirects=False).status_code==303
+        assert 'https://sub.1mo.us/i/'+sub_id in c.get('/customers/'+str(op['customer_id'])+'/links').text
+        assert 'https://sub.1mo.us/i/'+sub_id in c.get('/customers/'+str(op['customer_id'])).text
+        token=csrf(c,'/settings')
+        c.post('/settings',data={'csrf':token,'sub_url':'https://sub.1mo.us/{subId}?format=json'})
+        assert 'https://sub.1mo.us/'+sub_id+'?format=json' in c.get('/customers/'+str(op['customer_id'])+'/links').text.replace('&amp;','&')
+    with TestClient(create_app(replace(config,sub_url=''),service.remote,background=False)) as c:
+        login(c)
+        assert c.get('/settings').status_code==403
+

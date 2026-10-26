@@ -8,6 +8,7 @@ generic message so internal codes never leak onto the page.
 MESSAGES = {
     # ----- Navigation and common words
     'brand': 'Relay', 'brand_sub': 'Reseller panel',
+    'settings': 'Settings', 'invalid_sub_url': 'Enter a full address starting with https:// (or http://), for example https://sub.example.com/i/',
     'dashboard': 'Dashboard', 'customers': 'Customers', 'resellers': 'Resellers', 'inbounds': 'Inbounds',
     'activity': 'Activity', 'attention': 'Needs attention', 'account': 'Account',
     'login': 'Sign in', 'logout': 'Sign out', 'username': 'Username', 'password': 'Password',
@@ -49,7 +50,7 @@ MESSAGES = {
     'uuid': 'UUID', 'sub_id': 'Subscription ID', 'credential': 'Password', 'keep_credential': 'Leave empty to keep the current value.',
     'links': 'Connection links', 'subscription_link': 'Subscription link',
     'subscription_hint': 'Give this link to the customer. Their app keeps itself up to date with it.',
-    'no_subscription': 'No subscription link: the subscription service is off in 3X-UI. Turn it on in 3X-UI settings, or set XUI_SUB_URL in Relay.',
+    'no_subscription': 'No subscription address is set yet. The admin can add it under Settings.',
     'config_uris': 'Single configs', 'config_hint': 'One link per inbound. Use these if the app has no subscription support.',
     'no_links': 'No connection links yet. They appear after 3X-UI confirms the customer.',
     'enable_customer': 'Customer can connect', 'last_update': 'Last update', 'online_status': 'Connection',
@@ -166,6 +167,29 @@ MESSAGES = {
     'unsent_expired': 'Cancelled before it was sent.',
     'cancelled': 'Cancelled by the admin.',
     'remote_ack': '3X-UI accepted it; confirming.',
+
+    # ----- Bulk inbound changes
+    'bulk_title': 'Change many customers', 'bulk_button': 'Change inbounds', 'bulk_all_matching': 'Change all {n} customers in this list',
+    'bulk_hint': 'Add or remove inbounds for many customers at once. You see a preview first; nothing changes until you apply it.',
+    'bulk_by_filter': 'Picked by the list filters', 'bulk_all': 'All customers', 'bulk_what': 'What should happen?',
+    'bulk_add': 'Add inbounds', 'bulk_remove': 'Remove inbounds', 'bulk_move': 'Move to', 'bulk_enable': 'Turn on', 'bulk_disable': 'Turn off',
+    'bulk_explain_add': 'The chosen inbounds are added. Customers keep the inbounds they already have. Only inbounds with the same protocol as the customer are added.',
+    'bulk_explain_remove': 'The chosen inbounds are removed. A customer always keeps at least one inbound.',
+    'bulk_explain_move': 'Customers get exactly the chosen inbounds instead of their current ones (same protocol only). Handy when you replace a server.',
+    'bulk_explain_enable': 'Customers can connect again.', 'bulk_explain_disable': 'Customers cannot connect until you turn them on again. Their data and time are kept.',
+    'bulk_no_inbounds': 'No inbounds you can use.', 'bulk_preview': 'Preview', 'bulk_will_change': 'Will change', 'bulk_will_skip': 'Skipped',
+    'bulk_time': 'About', 'bulk_before': 'Now', 'bulk_after': 'After', 'bulk_apply': 'Apply to {n} customers',
+    'bulk_running': 'Running', 'bulk_finished': 'Finished', 'bulk_interrupted_tag': 'Stopped',
+    'bulk_running_hint': 'You can leave this page; the changes continue in the background.',
+    'bulk_done': 'Changed', 'bulk_skipped': 'Skipped', 'bulk_nothing': 'Nothing to change for these customers.',
+    'bulk_selected': 'selected', 'bulk_clear': 'Clear', 'bulk_select_page': 'Select all on this page',
+    'bulk_not_active': 'not active (removed, failed or still being set up)', 'bulk_attention': 'needs the admin\'s attention first',
+    'bulk_in_progress': 'another change is still running', 'bulk_owner_suspended': 'the reseller is suspended',
+    'bulk_plan_expired': 'the reseller\'s plan has expired', 'bulk_already': 'already like that',
+    'bulk_different_protocol': 'uses a different protocol', 'bulk_not_on_inbound': 'is not on these inbounds',
+    'bulk_last_inbound': 'would have no inbound left', 'bulk_inbound_denied': 'the reseller may not use this inbound',
+    'bulk_confirming': '3X-UI is confirming', 'bulk_interrupted': 'not changed (Relay restarted)',
+    'add_to_customers': 'Add to customers', 'remove_from_customers': 'Remove from customers',
 
     # ----- Change (operation) kinds
     'op_create': 'Create', 'op_update': 'Edit', 'op_delete': 'Delete',

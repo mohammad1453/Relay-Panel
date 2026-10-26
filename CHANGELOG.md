@@ -20,11 +20,19 @@ to schema 3 automatically.
   `status.sh` show the detected version and mode.
 - The admin can create customers directly. They have no plan limit, can use
   every inbound, and appear in 3X-UI with the group `RelayPanel`.
+- Change many customers at once: select customers on the list (or take
+  every customer matching the filters) and add, remove or move inbounds, or
+  turn them on or off. A preview shows who changes and who is skipped and
+  why; the changes then run in the background with a progress page. The
+  admin's Inbounds page has "Add to customers" / "Remove from customers"
+  shortcuts. Available to the admin and to resellers (their own customers
+  and permitted inbounds only).
+- Settings page for the admin: set the subscription address (for example
+  `https://sub.example.com/i/`, or with `{subId}` inside). Without it, no
+  subscription link is shown.
 - Connection links are titled "inbound name · customer name" (with the
   server address underneath) instead of the raw encoded remark, and the
-  subscription link is always shown first. Without `XUI_SUB_URL`, Relay uses
-  the subscription address configured in 3X-UI, with the public host instead
-  of 127.0.0.1.
+  subscription link is always shown first.
 - One-line online installer and updater (`install-online.sh`) that downloads a
   published GitHub release and checks its SHA-256.
 - Version number shown in the panel, `/healthz` and `status.sh`; GitHub Actions

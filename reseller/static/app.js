@@ -162,6 +162,34 @@
     history.replaceState(null, '', url.pathname + url.search);
   }));
 
+  // Bulk selection on the customer list.
+  const bulkForm = $('#bulk-form');
+  if (bulkForm) {
+    const items = () => $$('[data-bulk-item]');
+    const update = () => {
+      const n = items().filter(i => i.checked).length;
+      bulkForm.hidden = n === 0;
+      const count = $('[data-bulk-count]', bulkForm); if (count) count.textContent = n;
+      const all = $('[data-bulk-all]'); if (all) { all.checked = n > 0 && n === items().length; all.indeterminate = n > 0 && n < items().length; }
+    };
+    items().forEach(i => i.addEventListener('change', update));
+    const all = $('[data-bulk-all]');
+    all && all.addEventListener('change', () => { items().forEach(i => { i.checked = all.checked; }); update(); });
+    const clear = $('[data-bulk-clear]', bulkForm);
+    clear && clear.addEventListener('click', () => { items().forEach(i => { i.checked = false; }); update(); });
+    update();
+  }
+
+  // Bulk page: inbound choices only matter for add / remove / move.
+  $$('[data-bulk-action]').forEach(radio => radio.addEventListener('change', () => {
+    const box = $('#bulk-inbounds'); if (box) box.hidden = ['enable', 'disable'].includes(radio.value);
+    const explain = $('#bulk-explain'); if (explain) explain.textContent = radio.dataset.explain || '';
+  }));
+
+  // Pages that follow background work (bulk changes) refresh themselves until it is done.
+  const refresh = $('[data-auto-refresh]');
+  if (refresh) setTimeout(() => location.reload(), Number(refresh.dataset.autoRefresh) || 3000);
+
   // Filters that apply as soon as they change.
   $$('[data-autosubmit]').forEach(el => el.addEventListener('change', () => el.form && el.form.submit()));
 })();
