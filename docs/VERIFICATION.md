@@ -4,7 +4,7 @@ This is a local implementation, not a verified production deployment. No live pa
 
 ## Evidence
 
-- Read official v3.8.5 source, controllers, database models, central-client creation/update, protocol defaulting, native groups, first-use expiry, global traffic overlay, link generation and partial-node behavior.
+- Read the official 3X-UI source from v2.9.4 to v3.11.0 (controllers, client and inbound services, models) and ran Relay's service code against real v2.9.4, v3.0.2, v3.1.0 and v3.11.0 builds: create, edit, move, edit-in-3X-UI and accept, delete and force-remove all passed. See docs/API.md.
 - Automated tests exercise authentication/session isolation, CSRF, rate limiting, bilingual rendering, QR routes, accounting A–J, concurrency, timeout reconciliation, partial fanout, global traffic aggregation and all nine client-capable protocol request shapes.
 - Lifecycle tests use temporary application-owned paths and mocked system commands. SQLite backup/restore integrity and archive validation execute against actual local test databases.
 - Bash syntax checks execute with Git for Windows Bash. Linux systemd/apt/proxy effects are mocked, not run on a Linux VM or real VPS.

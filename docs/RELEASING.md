@@ -32,5 +32,8 @@ From then on the online installer installs or updates to the new version:
 bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh)
 ```
 
-Never move or reuse a published tag. If a release is broken, publish a new
-PATCH version.
+Prefer a new PATCH version for fixes. If the maintainer decides to rebuild a
+release under the same number, run **Release → Run workflow** with
+"Rebuild and replace the existing release" ticked: it deletes the old release
+and tag and publishes the current `main` under the same version. Anyone who
+already downloaded it will notice a different checksum.

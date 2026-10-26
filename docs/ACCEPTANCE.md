@@ -4,7 +4,7 @@ Local development date: 2026-10-13. No actual VPS or deployed master panel was a
 
 | Requirement area | Implementation / evidence |
 |---|---|
-| Initial inspection | Empty workspace; official v3.8.5 source cloned separately and inspected. See API contract. |
+| 3X-UI compatibility | Works with 3X-UI 2.x to 3.11.x by detecting the client API (3.1+) or the classic inbound API (2.x/3.0). Verified against real v2.9.4, v3.0.2, v3.1.0 and v3.11.0 builds. See docs/API.md. |
 | Independent accounts | Argon2id, server sessions, rotation, idle/absolute expiry, CSRF/origin checks, persistent rate limits, initial-password change. |
 | Role and tenant isolation | Backend ownership/role checks for list/detail/link/QR/edit/delete; cross-account and admin-route denial tests. |
 | Reseller management | Create/edit username, suspend, reset password, immutable native group tag, notes, inbound permissions, grant renewal/adjustment and history. |

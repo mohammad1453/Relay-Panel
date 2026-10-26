@@ -52,12 +52,12 @@
 
     <section class="card">
       <header class="card-head"><h2>{{ ui.icon('server') }} {{ t('inbounds_for_customer') }}</h2></header>
-      <p class="muted">{{ t('pick_inbounds') }}</p>
+      <p class="muted">{{ 'Pick one inbound. Your 3X-UI version allows one inbound per customer.' if single_inbound else t('pick_inbounds') }}</p>
       {{ ui.field_error('inbounds') }}
       <div class="choice-grid" role="group" aria-label="{{ t('inbounds_for_customer') }}">
         {% for i in inbounds %}{% if i.protocol in PROTOCOLS and (i.available or i.id in selected) %}
         <label class="choice {{ 'choice-off' if not i.available }}">
-          <input type="checkbox" name="inbounds" value="{{ i.id }}" data-protocol="{{ i.protocol }}" {{ 'checked' if i.id in selected }}>
+          <input type="{{ 'radio' if single_inbound else 'checkbox' }}" name="inbounds" value="{{ i.id }}" data-protocol="{{ i.protocol }}" {{ 'checked' if i.id in selected }}>
           <span class="choice-body"><b>{{ i.name or t('unnamed_inbound') }}</b><small><span class="tag tag-proto">{{ i.protocol }}</span> port {{ i.port }}{% if not i.available %} · {{ t('unavailable') }}{% endif %}</small></span>
           <span class="choice-check">{{ ui.icon('check') }}</span>
         </label>

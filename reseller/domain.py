@@ -12,7 +12,7 @@ from .security import password_hash
 from .xui import RemoteError
 
 GIB = 1024**3
-PROTOCOLS = {'vmess', 'vless', 'trojan', 'shadowsocks', 'hysteria', 'wireguard', 'amneziawg', 'mtproto', 'tuic'}
+from .domain_constants import PROTOCOLS  # noqa: E402  (re-exported for templates and tests)
 # Issues that mean the 3X-UI copy of a customer no longer matches Relay.
 DRIFT_ISSUES = ('remote_changed', 'remote_identity', 'remote_drift')
 # A sent create/update whose client is missing on this many full syncs is treated as gone.
@@ -181,13 +181,18 @@ class Service:
                 remaining += 1
         return remaining
 
+    @property
+    def protocols(self):
+        """Protocols the connected 3X-UI can manage clients for."""
+        return getattr(self.remote, 'protocols', PROTOCOLS) if self.remote else PROTOCOLS
+
     def _valid_inbounds(self, db, ids):
         ids = sorted(set(int(x) for x in ids))
         if not ids or len(ids) > 32:
             raise RuleError('inbound_denied')
         for iid in ids:
             ib = db.execute('SELECT * FROM inbounds WHERE id=?', (iid,)).fetchone()
-            if not ib or not ib['available'] or ib['protocol'] not in PROTOCOLS or ib['synced'] < now()-600:
+            if not ib or not ib['available'] or ib['protocol'] not in self.protocols or ib['synced'] < now()-600:
                 raise RuleError('inbound_unavailable')
         return ids
 
@@ -209,8 +214,10 @@ class Service:
             db.execute('UPDATE inbounds SET available=0')
             for ib in rows:
                 db.execute('INSERT INTO inbounds VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,protocol=excluded.protocol,port=excluded.port,available=excluded.available,metadata=excluded.metadata,synced=excluded.synced',
-                           (ib['id'], str(ib.get('remark','')), ib['protocol'], ib.get('port',0), int(ib.get('enable',False)), dumps(ib), now()))
+                           (ib['id'], str(ib.get('remark','')), ib['protocol'], ib.get('port',0), int(bool(ib.get('enable',False)) and ib['protocol'] in self.protocols), dumps(ib), now()))
             db.execute("INSERT INTO state VALUES('connection',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(now()),))
+            if hasattr(self.remote, 'info'):
+                db.execute("INSERT INTO state VALUES('xui_info',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (dumps(self.remote.info()),))
         return rows
 
     @staticmethod
@@ -310,6 +317,9 @@ class Service:
                     raise RuleError('inbound_denied',403)
             if kind != 'delete':
                 self._valid_inbounds(db, ids)
+                if len(ids) > 1 and getattr(self.remote, 'single_inbound', False):
+                    # Classic 3X-UI panels allow an email on one inbound only.
+                    raise RuleError('single_inbound')
                 amount = volume(form.get('volume', str(Decimal(customer['package'])/GIB) if customer else ''))
                 expiry = int(form.get('expiry', payload.get('expiryTime',0)))
                 preserved_expiry=bool(customer and expiry in (payload.get('expiryTime'),customer['remote_expiry']))
@@ -384,7 +394,7 @@ class Service:
         return (remote.get('email') == local['email'] and remote.get('subId') == local['sub_id']
                 and (not local['remote_id'] or remote.get('id') == local['remote_id'])
                 and (not local['uuid'] or remote.get('uuid') == local['uuid'])
-                and remote.get('group') == payload['group'])
+                and remote.get('group', payload['group']) == payload['group'])
 
     @staticmethod
     def _refund_amount(db, user_id, grant_id, customer_id, old_amount, new_amount, used):
@@ -473,13 +483,13 @@ class Service:
                 new_ids=set(desired['inboundIds'])
                 added=sorted(new_ids-old_ids)
                 removed=sorted(old_ids-new_ids)
-                if added:
-                    result=self.remote.attach(local['email'],added)
-                    if isinstance(result,dict) and result.get('nodePending'):
-                        self.uncertain(operation_id,'node_pending')
-                        return
-                if removed:
-                    result=self.remote.detach(local['email'],removed)
+                steps=[('attach',added),('detach',removed)]
+                if getattr(self.remote,'detach_first',False):
+                    steps.reverse()
+                for step,inbound_ids in steps:
+                    if not inbound_ids:
+                        continue
+                    result=getattr(self.remote,step)(local['email'],inbound_ids)
                     if isinstance(result,dict) and result.get('nodePending'):
                         self.uncertain(operation_id,'node_pending')
                         return
@@ -513,7 +523,8 @@ class Service:
     @staticmethod
     def _matches(actual, desired):
         keys = ('email','group','totalGB','enable','comment','subId')
-        if any(actual.get(k) != desired.get(k) for k in keys):
+        # A panel that does not report a field (e.g. group on old versions) is not a difference.
+        if any(k in actual and actual.get(k) != desired.get(k) for k in keys if k != 'email') or actual.get('email') != desired.get('email'):
             return False
         for field in ('id','password','auth'):
             remote_value=actual.get('uuid') if field=='id' and 'uuid' in actual else actual.get(field)

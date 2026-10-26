@@ -13,6 +13,11 @@ installer or `update.sh`; data and settings are kept and the database is upgrade
 to schema 3 automatically.
 
 ### Added
+- Works with every 3X-UI version from 2.x to the newest 3.x instead of only
+  3.8.5. Relay detects the panel's API: the client API on 3.1 and newer, the
+  classic inbound API on 2.x and 3.0 (one inbound per customer there). Tested
+  against real v2.9.4, v3.0.2, v3.1.0 and v3.11.0 panels. The dashboard and
+  `status.sh` show the detected version and mode.
 - One-line online installer and updater (`install-online.sh`) that downloads a
   published GitHub release and checks its SHA-256.
 - Version number shown in the panel, `/healthz` and `status.sh`; GitHub Actions

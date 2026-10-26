@@ -196,7 +196,7 @@ def create_app(config=None, remote=None, background=True):
             'rel':activity.relative,'expiry_text':expiry_text,'display_name':display_name,
             'now':now(),'timezone':config.timezone,'operation_id':str(uuid.uuid4()),'new_id':lambda:str(uuid.uuid4()),'writable':writable,
             'stale_after':config.sync_seconds*3,'message':message if known(message) else '',
-            'error':error if known(error) else ('error' if error else ''),'PROTOCOLS':PROTOCOLS,'base_path':config.base_path,
+            'error':error if known(error) else ('error' if error else ''),'PROTOCOLS':service.protocols,'base_path':config.base_path,
             'form_data':{},'field_errors':{},'page_error':'','sync':sync_status() if user else None,
             'attention_total':attention_count() if user and user['role']=='admin' else 0,
             'version':__version__,'quick_volumes':QUICK_VOLUMES,'quick_days':QUICK_DAYS,'link':link,
@@ -455,7 +455,9 @@ def create_app(config=None, remote=None, background=True):
                            LEFT JOIN grants g ON g.id=(SELECT id FROM grants WHERE user_id=u.id AND closed=0 AND starts<={now()} AND expires>{now()} ORDER BY id DESC LIMIT 1)
                            WHERE u.role='reseller' AND u.deleted=0 ORDER BY customers DESC, u.username LIMIT 6""")
             inbound_count=db.one('SELECT count(*) n FROM inbounds')['n']
-            return render(request,'dashboard.html',stats=stats,totals=totals,top=top,feed=feed,inbound_count=inbound_count,plan=None)
+            info=db.one("SELECT value FROM state WHERE key='xui_info'")
+            xui=json.loads(info['value']) if info else {}
+            return render(request,'dashboard.html',stats=stats,totals=totals,top=top,feed=feed,inbound_count=inbound_count,plan=None,xui=xui)
         plan=current_plan(user['id'])
         counts=db.one(f"""SELECT count(*) n,coalesce(sum(json_extract(payload,'$.enable')),0) enabled,
                           coalesce(sum(CASE WHEN {online_clause()} THEN 1 ELSE 0 END),0) online,
@@ -724,7 +726,8 @@ def create_app(config=None, remote=None, background=True):
         if form_data:
             values.update({k:v for k,v in form_data.items() if k!='inbounds'})
             selected=[int(i) for i in form_data.get('inbounds',[]) if str(i).isdigit()]
-        return render(request,'customer_form.html',status=status,customer=customer,p=p,v=values,inbounds=allowed(owner),selected=selected,
+        single=bool(getattr(remote,'single_inbound',False))
+        return render(request,'customer_form.html',status=status,customer=customer,p=p,v=values,inbounds=allowed(owner),selected=selected,single_inbound=single,
                       quota_remaining=quota_remaining,plan=plan,**context)
 
     def read_customer_form(form):
