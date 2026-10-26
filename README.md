@@ -22,7 +22,7 @@ Relay adds **resellers** to [3X-UI](https://github.com/MHSanaei/3x-ui). You give
 ## Requirements
 
 - A VPS with **Debian 12/13** or **Ubuntu 22.04 / 24.04 / 26.04**, x86_64 or arm64, with root access.
-- **3X-UI v3.8.5**. Relay checks the version and refuses to work with other versions.
+- **3X-UI, any version from 2.x to the newest 3.x.** Relay detects which API your panel has; on 3.1 and newer every feature works, on 2.x/3.0 each customer gets one inbound. See [3X-UI compatibility](docs/API.md).
 - A 3X-UI admin **API token** (recommended), or the 3X-UI admin username and password (without 2FA).
 
 ## Install
@@ -119,7 +119,7 @@ Relay uses [semantic versioning](https://semver.org/). The current version is sh
 - [Installation guide](docs/INSTALL.en.md) · [راهنمای نصب فارسی](docs/INSTALL.fa.md) (installation only; the panel is in English)
 - [Upgrading from 0.1.0](docs/UPGRADE.md)
 - [How Relay works and recovers](docs/ARCHITECTURE.md)
-- [3X-UI API contract](docs/API-3.8.5.md)
+- [3X-UI compatibility and API](docs/API.md)
 - [Security and known limits](docs/VERIFICATION.md)
 
 ## Development
@@ -140,7 +140,7 @@ Project layout:
 | Path | What it is |
 |---|---|
 | `reseller/domain.py` | Plans, customers, quota accounting and sync with 3X-UI |
-| `reseller/xui.py` | 3X-UI v3.8.5 API client |
+| `reseller/xui.py` | 3X-UI connection (detects client API or classic API) |
 | `reseller/web.py`, `templates/`, `static/` | Web panel |
 | `reseller/activity.py` | Turns logs into readable sentences |
 | `reseller/security.py` | Passwords, sessions, rate limits |

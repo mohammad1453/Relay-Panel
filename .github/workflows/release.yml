@@ -9,6 +9,11 @@ on:
     paths: [VERSION]
     tags: ["v*.*.*"]
   workflow_dispatch:
+    inputs:
+      replace:
+        description: "Rebuild and replace the existing release for the current VERSION (keeps the version number)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -33,8 +38,12 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} does not match VERSION $(cat VERSION)"; exit 1
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists; nothing to do."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.replace }}" = "true" ]; then
+              echo "replace=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Release $tag already exists; nothing to do."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
       - uses: actions/setup-python@v5
         if: steps.version.outputs.skip != 'true'
@@ -76,7 +85,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          REPLACE: ${{ steps.version.outputs.replace }}
         run: |
+          if [ "$REPLACE" = "true" ]; then
+            # Same version, new build: remove the old release and its tag, then publish again.
+            gh release delete "$TAG" --cleanup-tag --yes
+            git push origin ":refs/tags/$TAG" 2>/dev/null || true
+          fi
           gh release create "$TAG" \
             "dist/relay-panel-${TAG}.tar.gz" \
             "dist/relay-panel-${TAG}.tar.gz.sha256" \

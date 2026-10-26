@@ -360,3 +360,10 @@ def test_activity_is_readable_and_scoped(client,setup):
     other_client=TestClient(create_app(setup[0],service.remote,background=False))
     login(other_client,'other','Another-test-password!')
     assert 'customer-one' not in other_client.get('/activity').text
+
+
+def test_dashboard_shows_detected_3xui(client,setup):
+    setup[3].sync_inbounds()
+    login(client,'admin')
+    page=client.get('/').text
+    assert 'client API' in page and 'Relay needs 3X-UI version' not in page

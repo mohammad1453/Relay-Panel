@@ -32,6 +32,7 @@
     <dl class="kv">
       <div><dt>{{ t('status') }}</dt><dd>{% if sync.failing %}{{ ui.tag('sync_failing','danger') }}{% elif sync.ok %}<span class="tag tag-success">Connected</span>{% else %}{{ ui.tag('sync_waiting','warning') }}{% endif %}</dd></div>
       <div><dt>{{ t('last_sync') }}</dt><dd title="{{ date(sync.ok) }}">{{ sync.ago or t('never') }}</dd></div>
+      <div><dt>3X-UI</dt><dd>{% if xui.mode %}{{ 'v'+xui.version if xui.version else 'version not reported' }} · {{ t('xui_mode_'+xui.mode) }}{% else %}—{% endif %}</dd></div>
       <div><dt>{{ t('inbounds') }}</dt><dd><a href="/inbounds">{{ number(inbound_count) }}</a></dd></div>
       <div><dt>{{ t('total_granted') }}</dt><dd>{{ gb(totals.granted) }} GB</dd></div>
       <div><dt>{{ t('total_sold') }}</dt><dd>{{ gb(totals.sold) }} GB</dd></div>

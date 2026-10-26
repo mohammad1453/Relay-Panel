@@ -72,7 +72,11 @@ def main():
         remote=XUI(config)
         try:
             if args.command=='check':
-                print(f'Database OK. Master returned {len(remote.inbounds())} inbounds (read only).')
+                count=len(remote.inbounds())
+                remote.clients()
+                info=remote.info()
+                mode={'clients':'client API','classic':'classic API (one inbound per customer)'}.get(info['mode'],info['mode'])
+                print(f"Database OK. 3X-UI {('v'+info['version']) if info['version'] else '(version not reported)'} via {mode}: {count} inbounds (read only).")
             else:
                 Service(db,remote).refresh()
                 print('Reconciliation completed. Review unresolved operations in the web console.')

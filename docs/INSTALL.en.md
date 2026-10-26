@@ -2,7 +2,7 @@
 
 ## Requirements
 
-Debian 12/13 or Ubuntu 22.04/24.04/26.04, x86_64 or aarch64, systemd, Python 3.10+, sudo/root, internet for package installation and at least 1 GiB free space. These are supported installer targets, **not a claim of live distro/VPS testing**. The panel must be MHSanaei/3x-ui **v3.8.5**. Have its actual API base URL including web path and an admin-scoped token (recommended), or username/password without interactive 2FA. These are backend credentials only.
+Debian 12/13 or Ubuntu 22.04/24.04/26.04, x86_64 or aarch64, systemd, Python 3.10+, sudo/root, internet for package installation and at least 1 GiB free space. These are supported installer targets, **not a claim of live distro/VPS testing**. Any MHSanaei/3x-ui version from 2.x to the newest 3.x works; see [3X-UI compatibility](API.md). Have its actual API base URL including web path and an admin-scoped token (recommended), or username/password without interactive 2FA. These are backend credentials only.
 
 Inspect your panel installation without changing it:
 
