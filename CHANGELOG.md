@@ -6,6 +6,16 @@ All notable changes to Relay are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-27
+
+### Added
+- **Telegram API address** setting for servers where Telegram is blocked:
+  point the bot at your own relay, such as a Cloudflare Worker. The Worker
+  code is in `deploy/telegram-worker.js`.
+- Guide for servers in Iran and other blocked countries in
+  `docs/TELEGRAM.md`: a private proxy inbound in 3X-UI routed through your
+  foreign server, or a Cloudflare Worker, with test commands for each.
+
 ## [1.1.0] - 2026-10-26
 
 Update in place with the online installer; the database is upgraded to schema 5
@@ -105,7 +115,8 @@ to schema 3 automatically.
 
 Initial public version.
 
-[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/mohammad1453/Relay-Panel/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mohammad1453/Relay-Panel/releases/tag/v1.0.0
 [0.1.0]: https://github.com/mohammad1453/Relay-Panel/commit/3ce308d

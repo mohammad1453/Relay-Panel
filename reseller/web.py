@@ -1060,7 +1060,7 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
     def settings_render(request,status=200,**context):
         row=db.one("SELECT value FROM state WHERE key='setting:sub_url'")
         ctx={'sub_url':row['value'] if row else '','env_sub_url':config.sub_url,'example':subscription_link_for('SUBSCRIPTION-ID'),
-             'tg':telegram.status(),'tg_has_token':bool(telegram.setting('token')),'tg_proxy':telegram.setting('proxy'),
+             'tg':telegram.status(),'tg_has_token':bool(telegram.setting('token')),'tg_proxy':telegram.setting('proxy'),'tg_api':telegram.setting('api'),
              'tg_hour':telegram.setting('report_hour','9'),'tg_linked':telegram.linked(request.state.user['id'])}
         ctx.update(context)
         return render(request,'settings.html',status=status,**ctx)
@@ -1085,17 +1085,22 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         form=await request.form()
         token=str(form.get('token','')).strip()
         proxy=str(form.get('proxy','')).strip()
+        api_url=str(form.get('api_url','')).strip().rstrip('/')
         hour=str(form.get('report_hour','9')).strip()
         errors={}
         if token and (':' not in token or any(c.isspace() for c in token) or len(token)>100):
             errors['token']='telegram_bad_token'
         if proxy and urlsplit(proxy).scheme not in ('http','https','socks5','socks5h'):
             errors['proxy']='telegram_bad_proxy'
+        if api_url:
+            parts=urlsplit(api_url)
+            if parts.scheme!='https' or not parts.hostname or parts.query or parts.fragment or parts.username or any(c.isspace() for c in api_url) or len(api_url)>200:
+                errors['api_url']='telegram_bad_api'
         if not hour.isdigit() or not 0<=int(hour)<=23:
             errors['report_hour']='invalid_input'
         if errors:
-            return settings_render(request,status=400,page_error=next(iter(errors.values())),field_errors=errors,tg_proxy=proxy,tg_hour=hour)
-        telegram.save_settings(user,enabled='1' if form.get('enabled')=='on' else '0',token=token or None,proxy=proxy,report_hour=hour)
+            return settings_render(request,status=400,page_error=next(iter(errors.values())),field_errors=errors,tg_proxy=proxy,tg_api=api_url,tg_hour=hour)
+        telegram.save_settings(user,enabled='1' if form.get('enabled')=='on' else '0',token=token or None,proxy=proxy,api=api_url,report_hour=hour)
         if token:
             with db.transaction() as conn:
                 conn.execute("DELETE FROM state WHERE key IN ('tg:username','tg:error','tg:offset')")

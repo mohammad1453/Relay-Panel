@@ -16,6 +16,7 @@ class FakeTelegram:
     def __init__(self):
         self.sent, self.calls, self.updates, self.next_id = [], [], [], 1
         self.fail = None
+        self.hosts = []
 
     def push_text(self, chat_id, text):
         self.updates.append({'update_id': self.next_id, 'message': {'chat': {'id': chat_id, 'type': 'private', 'first_name': 'Ali'}, 'text': text}})
@@ -30,6 +31,7 @@ class FakeTelegram:
         method = request.url.path.rsplit('/', 1)[-1]
         body = json.loads(request.content or b'{}')
         self.calls.append((method, body))
+        self.hosts.append(request.url.host)
         if self.fail:
             return httpx.Response(200, json={'ok': False, 'error_code': self.fail, 'description': 'Forbidden: bot was blocked by the user'})
         if method == 'getMe':
@@ -241,3 +243,19 @@ def test_request_from_panel_and_admin_decides_on_attention_page(setup):
     with TestClient(create_app(config, service.remote, background=False)) as c:
         login(c)
         assert 'was approved' in c.get('/').text and 'half now' in c.get('/').text
+
+
+def test_custom_api_address(bot):
+    fake, tg, client = bot
+    token = login(client, 'admin')
+    for bad in ('http://tg.example.com', 'https://tg.example.com/?x=1', 'nope'):
+        page = client.post('/settings/telegram', data={'csrf': token, 'enabled': 'on', 'token': '123456:ABCdef', 'api_url': bad, 'report_hour': '9'})
+        assert page.status_code == 400 and 'must be an https:// address' in page.text
+        token = csrf(client, '/settings')
+    response = client.post('/settings/telegram', data={'csrf': token, 'enabled': 'on', 'token': '123456:ABCdef', 'api_url': 'https://tg.example.com/relay/', 'report_hour': '9'}, follow_redirects=False)
+    assert response.status_code == 303
+    assert fake.hosts[-1] == 'tg.example.com' and fake.calls[-1][0] == 'getMe'
+    assert 'value="https://tg.example.com/relay"' in client.get('/settings').text
+    token = csrf(client, '/settings')
+    client.post('/settings/telegram', data={'csrf': token, 'enabled': 'on', 'api_url': '', 'report_hour': '9'})
+    assert fake.hosts[-1] == 'api.telegram.org'

@@ -72,8 +72,11 @@ class TelegramError(Exception):
         super().__init__(description)
 
 
+DEFAULT_API = 'https://api.telegram.org'
+
+
 class TelegramAPI:
-    def __init__(self, token, proxy='', transport=None, base='https://api.telegram.org'):
+    def __init__(self, token, proxy='', transport=None, base=DEFAULT_API):
         self.client = httpx.Client(base_url=f'{base}/bot{token}/', timeout=httpx.Timeout(40, connect=10),
                                    proxy=proxy or None, transport=transport, trust_env=False)
 
@@ -115,19 +118,19 @@ class Telegram:
                 db.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                            ('setting:tg_'+key, str(value)))
             audit(db, actor['id'], 'settings_update', 'Telegram')
-        self._api_key = None   # rebuild the client with the new token / proxy
+        self._api_key = None   # rebuild the client with the new token / proxy / API address
 
     def enabled(self):
         return self.setting('enabled') == '1' and bool(self.setting('token'))
 
     def api(self):
-        key = (self.setting('token'), self.setting('proxy'))
+        key = (self.setting('token'), self.setting('proxy'), self.setting('api').rstrip('/'))
         if not key[0]:
             return None
         if key != self._api_key:
             if self._api:
                 self._api.close()
-            self._api, self._api_key = TelegramAPI(key[0], key[1], self.transport), key
+            self._api, self._api_key = TelegramAPI(key[0], key[1], self.transport, key[2] or DEFAULT_API), key
         return self._api
 
     def _state(self, key, default=''):
