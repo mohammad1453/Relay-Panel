@@ -205,7 +205,8 @@ MESSAGES = {
     'telegram_off': 'The Telegram bot is turned off. The admin can turn it on under Settings.',
     'telegram_unreachable': 'Relay cannot reach Telegram with this token. Check the token, or set a proxy if Telegram is blocked on this server.',
     'telegram_not_linked': 'Connect your own Telegram on the Account page first.', 'telegram_bad_token': 'This does not look like a bot token. It looks like 123456789:AAE…',
-    'telegram_bad_proxy': 'The proxy must start with socks5://, http:// or https://.', 'telegram_unlinked': 'Telegram disconnected.',
+    'telegram_bad_proxy': 'The proxy must start with socks5://, http:// or https://.',
+    'telegram_bad_api': 'The Telegram API address must be an https:// address, e.g. https://tg.example.com.', 'telegram_unlinked': 'Telegram disconnected.',
     'telegram_test_sent': 'Test message sent. Check Telegram.',
 
     # ----- Change (operation) kinds

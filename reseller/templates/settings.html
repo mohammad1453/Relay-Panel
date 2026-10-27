@@ -38,6 +38,10 @@
       <input name="report_hour" type="number" min="0" max="23" value="{{ tg_hour }}" {{ ui.invalid('report_hour') }}>{{ ui.field_error('report_hour') }}
     </label>
   </div>
+  <label class="field">Telegram API address (optional)
+    <input name="api_url" value="{{ tg_api }}" placeholder="https://api.telegram.org" spellcheck="false" dir="ltr" {{ ui.invalid('api_url') }}>
+    <small class="hint">Leave empty to use Telegram directly. Set it to your own relay, such as a Cloudflare Worker, when Telegram is blocked. See docs/TELEGRAM.md.</small>{{ ui.field_error('api_url') }}
+  </label>
   <div class="actions-end">
     <button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button>
   </div>
