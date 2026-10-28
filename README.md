@@ -14,7 +14,8 @@ Relay adds **resellers** to [3X-UI](https://github.com/MHSanaei/3x-ui). You give
 - **Stays in sync with 3X-UI** every 30 seconds: usage, online status and expiry. Inbounds or customers deleted in 3X-UI disappear from Relay too.
 - **Change many customers at once:** add, remove or move inbounds (or turn customers on/off) for selected customers or a whole filtered list, with a preview before anything changes.
 - **Settings page:** set your subscription address once (e.g. `https://sub.example.com/i/`); every customer gets their own link.
-- **Needs attention** page for the admin: anything Relay could not finish, explained in plain words with the right buttons. If someone edits a customer directly in 3X-UI, you see exactly what changed and can accept it with one click.
+- **3X-UI wins:** change a customer directly in 3X-UI and Relay copies it right away, free for the reseller. You and the reseller are told what changed, and you can undo it for 7 days. Prefer to approve each change? Choose **Ask me first** in Settings.
+- **Needs attention** page for the admin: anything Relay could not finish, explained in plain words with the right buttons.
 - **Telegram bot:** alerts for the admin and each reseller, with buttons to approve requests, accept 3X-UI changes, turn customers on or off and more. See [docs/TELEGRAM.md](docs/TELEGRAM.md).
 - **Requests for more data:** resellers ask from their dashboard or the bot; the admin approves or declines with one click.
 - **Readable activity log** for admins and resellers ("You created customer ali-phone", "Inbound VMess WS was deleted in 3X-UI").

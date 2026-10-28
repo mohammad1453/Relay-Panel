@@ -178,8 +178,22 @@ def test_update_and_failure_rollback_mocked(installation,tmp_path,monkeypatch):
     with pytest.raises(RuntimeError,match='simulated'):
         ops.update(args)
     assert (ops.CODE/'README.md').read_text()=='Previous source sentinel'
-    assert db.one("SELECT value FROM state WHERE key='write_lock'")['value']=='restored'
+    # An update rollback restores a copy taken with Relay stopped: nothing is missing, so sales stay open.
+    assert db.one("SELECT value FROM state WHERE key='write_lock'") is None
     assert not any('x-ui.service' in command for command in commands)
+
+
+def test_update_stops_relay_before_taking_the_rollback_copy(installation,tmp_path,monkeypatch):
+    db,commands=installation
+    ops.copy_source(ops.ROOT,ops.CODE)
+    archive,hash_value=make_release(tmp_path)
+    order=[]
+    real_backup=ops.backup
+    monkeypatch.setattr(ops,'backup',lambda:(order.append('backup'),real_backup())[1])
+    real_run=ops.run
+    monkeypatch.setattr(ops,'run',lambda args,check=True,**kw:(order.append(' '.join(map(str,args))) if 'systemctl' in str(args[0]) else None,real_run(args,check,**kw))[1])
+    ops.update(SimpleNamespace(archive=str(archive),sha256=hash_value))
+    assert order.index('systemctl stop xui-reseller.service')<order.index('backup')
 
 
 def test_install_failure_preserves_data(installation,monkeypatch):

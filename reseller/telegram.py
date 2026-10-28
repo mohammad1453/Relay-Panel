@@ -36,7 +36,8 @@ log = logging.getLogger('relay.telegram')
 # What each person is told about, with defaults. Shown as switches on the Account page.
 PREFS = {
     'admin': [
-        ('attention', 'Customers that need my attention (changed in 3X-UI, stuck, failed)', True),
+        ('attention', 'Things that need me (stuck or failed changes, sales paused)', True),
+        ('changes', 'Customers changed in 3X-UI and accepted automatically, with Undo', True),
         ('requests', 'Requests from resellers for more data', True),
         ('sync', '3X-UI unreachable and back again', True),
         ('plans', 'Reseller plans almost used up or about to expire', True),
@@ -50,6 +51,7 @@ PREFS = {
         ('plans', 'My plan: almost used up, about to expire, renewed', True),
         ('requests', 'Answers to my requests for more data', True),
         ('removals', 'My customers deleted in 3X-UI', True),
+        ('changes', 'My customers changed by the admin in 3X-UI', True),
         ('jobs', 'My bulk changes finished', True),
         ('daily', 'Daily summary: customers expiring or out of data', True),
     ],
@@ -601,7 +603,11 @@ class Telegram:
     def cmd_attention(self, chat_id, user, rest):
         items = self.attention_items()
         pending = self.db.all("SELECT * FROM requests WHERE status='pending' ORDER BY id")
-        if not items and not pending:
+        locked = self.service.sales_locked()
+        if locked:
+            text, buttons = self.lock_message()
+            self.reply(chat_id, text, buttons)
+        if not items and not pending and not locked:
             return self.reply(chat_id, '✅ All clear. Nothing needs you.')
         for kind, row, snapshot in items[:10]:
             self.reply(chat_id, *self.attention_message(kind, row, snapshot))
@@ -723,6 +729,12 @@ class Telegram:
         if action == 'lnk':
             self.send_links(chat_id, user, int(arg))
             return ''
+        if action == 'und':
+            if not admin:
+                raise RuleError('forbidden', 403)
+            self.service.undo_remote(user, int(arg))
+            self._done(chat_id, message_id, '↩️ Undone')
+            return 'The old values are back in 3X-UI.'
         if action in ('rqy', 'rqn'):
             if not admin:
                 raise RuleError('forbidden', 403)
@@ -781,6 +793,30 @@ class Telegram:
             self.notify(f"🗑 Customer <b>{name}</b> ({esc(c['owner'])}) {why}.", 'removals', role='admin', dedupe=key)
             if c['owner_role'] == 'reseller':
                 self.notify(f"🗑 Your customer <b>{name}</b> {why}.", 'removals', user_id=c['user_id'], dedupe=key)
+        elif action == 'customer_auto_accepted' and data.get('customer'):
+            c = self._customer_owner(int(data['customer']))
+            if not c or c['status'] != 'active':
+                return
+            name = esc(display_name(c['email']))
+            names = {r['id']: r['name'] for r in self.db.all('SELECT id,name FROM inbounds')}
+            rows = activity.change_rows(data, names, self._date)
+            lines = ''.join(f"\n• {esc(f)}: {esc(a)} → <b>{esc(b)}</b>" for f, a, b in rows)
+            owner = f" ({esc(c['owner'])})" if c['owner_role'] == 'reseller' else ''
+            self.notify(f"🔄 Customer <b>{name}</b>{owner} was changed in 3X-UI. Relay now uses the new values (free for the reseller).{lines}",
+                        'changes', role='admin', dedupe=key,
+                        buttons=[[['↩️ Undo', f"und:{c['id']}"]] + [x for x in [self._open('Open', f"/customers/{c['id']}")] if x]])
+            if c['owner_role'] == 'reseller':
+                text = f"🔄 The admin changed your customer <b>{name}</b>.{lines}\nThis did not use any data from your plan."
+                buttons = None
+                if data.get('identity'):
+                    text += '\n🔗 Their link changed: send the customer the new link.'
+                    buttons = [[['🔗 New links', f"lnk:{c['id']}"]]]
+                self.notify(text, 'changes', user_id=c['user_id'], buttons=buttons, dedupe=key)
+        elif action == 'customer_undo_remote' and data.get('customer'):
+            c = self._customer_owner(int(data['customer']))
+            if c and c['owner_role'] == 'reseller':
+                self.notify(f"↩️ The admin put back the previous values of your customer <b>{esc(display_name(c['email']))}</b>.",
+                            'changes', user_id=c['user_id'], dedupe=key)
         elif action == 'inbound_removed':
             text = f"🔌 Inbound <b>{esc(data.get('name') or '#'+str(data.get('id')))}</b> was deleted in 3X-UI and removed from Relay"
             text += f"; {data.get('customers')} customers lost it." if data.get('customers') else '.'
@@ -826,7 +862,16 @@ class Telegram:
         elif action == 'login' and e['outcome'] == 'ok' and e['role'] == 'admin':
             self.notify(f"🔐 <b>{esc(e['username'])}</b> signed in to Relay ({self._date(e['created'])}).", 'logins', role='admin', dedupe=key)
 
+    def lock_message(self):
+        return ("🔒 <b>Sales are paused</b> after a backup restore. Nobody can create or change customers. "
+                "Check customers and plans, then unlock sales on the Needs attention page.",
+                [[button]] if (button := self._open('Open Needs attention', '/attention')) else None)
+
     def scan_attention(self):
+        if self.service.sales_locked():
+            unlocks = self.db.one("SELECT count(*) n FROM audit WHERE action='restore_unlock'")['n']
+            text, buttons = self.lock_message()
+            self.notify(text, 'attention', role='admin', buttons=buttons, dedupe=f'lock:{unlocks}')
         for kind, row, snapshot in self.attention_items():
             if kind == 'drift':
                 key = f"att:drift:{row['id']}:{hashlib.sha1(snapshot.encode()).hexdigest()[:12]}"

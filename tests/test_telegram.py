@@ -105,6 +105,7 @@ def test_unknown_chat_and_wrong_code(bot):
 def test_drift_alert_and_accept_button(bot, setup):
     fake, tg, client = bot
     _, panel, db, service, admin, actor, _ = setup
+    service.set_remote_changes_mode(db.one("SELECT * FROM users WHERE role='admin'"), 'ask')
     enable(client, fake)
     link(tg, fake, admin, 100)
     op = sale(service, actor, email='drifty')
@@ -259,3 +260,51 @@ def test_custom_api_address(bot):
     token = csrf(client, '/settings')
     client.post('/settings/telegram', data={'csrf': token, 'enabled': 'on', 'api_url': '', 'report_hour': '9'})
     assert fake.hosts[-1] == 'api.telegram.org'
+
+
+def test_auto_accepted_change_alerts_with_undo(bot, setup):
+    fake, tg, client = bot
+    _, panel, db, service, admin, actor, _ = setup
+    enable(client, fake)
+    link(tg, fake, admin, 100)
+    link(tg, fake, actor, 200)
+    op = sale(service, actor, email='gifted')
+    tg.step()
+    panel.rows['gifted']['totalGB'] = 250 * 1024**3
+    panel.rows['gifted']['subId'] = 'new-sub-id'
+    service.refresh()
+    tg.step()
+    alert = next(m for m in fake.sent if m['chat_id'] == 100 and 'was changed in 3X-UI' in m['text'])
+    assert '100 GB → <b>250 GB</b>' in alert['text']
+    buttons = [b.get('callback_data') for row in alert['reply_markup']['inline_keyboard'] for b in row]
+    assert f"und:{op['customer_id']}" in buttons
+    note = next(m for m in fake.sent if m['chat_id'] == 200 and 'The admin changed your customer' in m['text'])
+    assert 'did not use any data' in note['text'] and 'send the customer the new link' in note['text']
+    fake.push_button(200, f"und:{op['customer_id']}")     # resellers cannot undo
+    tg.step()
+    assert panel.rows['gifted']['totalGB'] == 250 * 1024**3
+    fake.push_button(100, f"und:{op['customer_id']}")
+    tg.step()
+    tg.step()
+    assert panel.rows['gifted']['totalGB'] == 100 * 1024**3
+    assert any('put back the previous values' in t for t in fake.texts(200))
+
+
+def test_paused_sales_alert_and_attention_command(bot, setup):
+    fake, tg, client = bot
+    _, panel, db, service, admin, actor, _ = setup
+    enable(client, fake)
+    link(tg, fake, admin, 100)
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO state VALUES('write_lock','restored')")
+    tg.step()
+    tg.step()
+    assert sum('Sales are paused' in t for t in fake.texts(100)) == 1
+    fake.push_text(100, '/attention')
+    tg.step()
+    assert 'Sales are paused' in fake.texts(100)[-1]
+    service.unlock_sales(admin)
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO state VALUES('write_lock','restored')")
+    tg.step()
+    assert sum('Sales are paused' in t for t in fake.texts(100)) == 3   # a new lock is announced again

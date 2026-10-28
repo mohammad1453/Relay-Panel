@@ -81,6 +81,7 @@ def test_absent_count_needs_spaced_syncs(setup):
 
 def test_edit_in_3xui_flags_customer_and_accept_copies_values(setup):
     _, panel, db, service, admin, actor, _ = setup
+    service.set_remote_changes_mode(db.one("SELECT * FROM users WHERE role='admin'"), 'ask')
     op = sale(service, actor)
     panel.rows['customer-one']['totalGB'] = 200 * 1024**3
     panel.rows['customer-one']['comment'] = 'changed in 3x-ui'

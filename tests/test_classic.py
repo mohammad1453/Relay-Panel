@@ -82,6 +82,7 @@ def test_trojan_and_shadowsocks(classic, inbound, field):
 def test_edit_in_classic_panel_is_flagged_and_accepted(classic):
     _, panel, db, service, admin, actor = classic
     op = sale(service, actor, email='edited')
+    service.set_remote_changes_mode(db.one("SELECT * FROM users WHERE role='admin'"), 'ask')
     panel.find(1)['settings']['clients'][0]['comment'] = 'changed in 3x-ui'
     service.refresh()
     assert db.one('SELECT issue FROM customers WHERE id=?', (op['customer_id'],))['issue'] == 'remote_changed'
@@ -114,3 +115,19 @@ def test_form_and_dashboard_show_classic_mode(classic):
     with TestClient(create_app(config, service.remote, background=False)) as client:
         login(client, 'admin')
         assert 'classic API' in client.get('/').text
+
+
+def test_change_in_classic_panel_is_accepted_and_undone(classic):
+    _, panel, db, service, admin, actor = classic
+    op = sale(service, actor, email='classic-gift')
+    client = panel.find(1)['settings']['clients'][0]
+    client['totalGB'] = 300 * 1024**3
+    client['comment'] = 'gift'
+    service.refresh()
+    c = db.one('SELECT * FROM customers WHERE id=?', (op['customer_id'],))
+    assert c['issue'] == '' and c['package'] == 300 * 1024**3
+    service.undo_remote(admin, op['customer_id'])
+    client = panel.find(1)['settings']['clients'][0]
+    assert client['totalGB'] == 100 * 1024**3 and client['comment'] != 'gift'
+    service.refresh()
+    assert db.one('SELECT issue,package FROM customers WHERE id=?', (op['customer_id'],)) == {'issue': '', 'package': 100 * 1024**3}

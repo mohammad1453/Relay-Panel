@@ -6,6 +6,26 @@ All notable changes to Relay are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-28
+
+### Added
+- **3X-UI wins** (new default, Settings → Changes made in 3X-UI). When you
+  change a customer directly in 3X-UI, Relay copies the new values right away
+  instead of pausing the customer. It is free for the reseller: extra data is
+  a gift and is never refunded into their plan, even if they shrink the
+  customer later. You see what changed on the customer page and in Telegram,
+  with an **Undo** button for 7 days. The reseller gets a message too, with
+  the new link when it changed. **Ask me first** keeps the old behaviour.
+- **Unlock sales** button on Needs attention after a backup restore, a banner
+  on every page while sales are paused, and a Telegram alert.
+
+### Fixed
+- An update that failed and rolled back by itself paused all sales ("Sales
+  are paused after a backup restore") and only a command-line tool could
+  unlock them. The rollback now restores a copy taken with Relay stopped, so
+  nothing can be missing and sales stay open. The same applies when a
+  restore fails and rolls back.
+
 ## [1.1.2] - 2026-10-28
 
 ### Fixed
@@ -130,7 +150,8 @@ to schema 3 automatically.
 
 Initial public version.
 
-[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/mohammad1453/Relay-Panel/compare/v1.0.0...v1.1.0

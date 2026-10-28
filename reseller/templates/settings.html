@@ -17,6 +17,19 @@
   <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
 </form>
 
+<form method="post" action="/settings/remote-changes" class="card stack" id="remote-changes">
+  {{ ui.csrf_field() }}
+  <header class="card-head"><h2>{{ ui.icon('sync') }} Changes made in 3X-UI</h2></header>
+  <p class="muted">What Relay does when you change a customer directly in 3X-UI (data limit, expiry, on/off, inbounds, links). A change made in 3X-UI is a gift: it never uses or returns data from the reseller's plan.</p>
+  <div class="choice-grid">
+    <label class="choice"><input type="radio" name="mode" value="auto" {{ 'checked' if remote_changes=='auto' }}><span class="choice-check">{{ ui.icon('check') }}</span>
+      <span class="choice-body"><b>3X-UI wins</b><small>Recommended. Relay copies the new values right away and tells you and the reseller. You can undo it for 7 days.</small></span></label>
+    <label class="choice"><input type="radio" name="mode" value="ask" {{ 'checked' if remote_changes=='ask' }}><span class="choice-check">{{ ui.icon('check') }}</span>
+      <span class="choice-body"><b>Ask me first</b><small>The customer is paused under Needs attention until you accept or remove it.</small></span></label>
+  </div>
+  <div class="actions-end"><button class="btn btn-primary" data-working="{{ t('working') }}">{{ ui.icon('check') }}<span>{{ t('save') }}</span></button></div>
+</form>
+
 <form method="post" action="/settings/telegram" class="card stack" novalidate id="telegram">
   {{ ui.csrf_field() }}
   <header class="card-head"><h2>{{ ui.icon('send') }} Telegram bot</h2>
