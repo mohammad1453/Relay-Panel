@@ -170,16 +170,18 @@ def mark(path,mode):
 def copy_source(source,destination):
     # Explicit allowlist excludes master reference checkout, local state and secrets.
     destination.mkdir(parents=True,exist_ok=True)
-    for name in ('reseller','deploy','docs','VERSION','requirements.txt','requirements.lock','requirements-dev.txt','README.md','.env.example','install.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh'):
+    for name in ('reseller','deploy','docs','VERSION','requirements.txt','requirements.lock','requirements-dev.txt','README.md','.env.example','install.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh','wheels'):
         src=source/name
         if not src.exists():
-            if name=='VERSION':
-                continue  # releases before 1.0.0 had no VERSION file
+            if name in ('VERSION','wheels'):
+                continue  # VERSION: releases before 1.0.0; wheels: releases before 1.1.2
             fail('Source package is incomplete: '+name)
         if src.is_symlink() or src.is_dir() and any(p.is_symlink() for p in src.rglob('*')):
             fail('Source symlinks are not allowed')
         if source.resolve()==destination.resolve():
             continue
+        if name=='wheels' and (destination/name).is_dir():
+            shutil.rmtree(destination/name)   # drop packages of older releases
         if src.is_dir():
             shutil.copytree(src,destination/name,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
         else:
@@ -187,16 +189,42 @@ def copy_source(source,destination):
     (destination/'.relay-owned').touch(mode=0o600)
 
 
+PIP_HINT=('Could not download Python packages from pypi.org. If this server cannot reach the internet freely '
+          '(for example in Iran), run the installer again through a proxy, e.g. --proxy http://127.0.0.1:10808. '
+          'See "Installing behind a proxy" in docs/INSTALL.en.md.')
+
+
+def pip_install(check=True):
+    """Install the locked packages. Packages shipped in the release (wheels/) are used first, so an
+    update normally needs no internet; anything missing is downloaded from pypi.org."""
+    base=[CODE/'.venv/bin/pip','install','--disable-pip-version-check','-r',CODE/'requirements.txt','-c',CODE/'requirements.lock']
+    wheels=CODE/'wheels'
+    if wheels.is_dir():
+        print('Installing Python packages included in the release...')
+        if run([*base,'-q','--no-index','--find-links',wheels],check=False,capture_output=True).returncode==0:
+            return
+        print('Some packages are not in the release; downloading them from pypi.org...')
+        base=[*base,'--find-links',wheels]
+    if run(base,check=False).returncode!=0:
+        print(PIP_HINT)
+        if check:
+            fail('Python package installation failed')
+
+
 def app(command,*args,check=True):
     # Application schema creation and bootstrap run as its service user.
     return run(['runuser','-u','xui-reseller','--',CODE/'.venv/bin/python','-m','reseller.manage',command,'--env',CONFIG/'app.env',*args],cwd=CODE,check=check)
+
+
+# Local checks never go through a proxy set for downloads.
+LOCAL=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def health(port):
     base_path=config_read().get('APP_BASE_PATH','')
     for _ in range(20):
         try:
-            with urllib.request.urlopen('http://127.0.0.1:'+str(port)+base_path+'/healthz',timeout=2) as response:
+            with LOCAL.open('http://127.0.0.1:'+str(port)+base_path+'/healthz',timeout=2) as response:
                 if json.load(response).get('status')=='ok':
                     return
         except (OSError,ValueError):
@@ -283,7 +311,7 @@ def install(args):
     run(['chown','root:xui-reseller',CONFIG])
     copy_source(ROOT,CODE)
     run(['python3','-m','venv',CODE/'.venv'])
-    run([CODE/'.venv/bin/pip','install','-r',CODE/'requirements.txt','-c',CODE/'requirements.lock'])
+    pip_install()
     if values is not None:
         fd=os.open(CONFIG/'app.env',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o640)
         with os.fdopen(fd,'w') as stream:
@@ -426,7 +454,7 @@ def update(args):
         run(['systemctl','stop',SERVICE])
         try:
             copy_source(source,CODE)
-            run([CODE/'.venv/bin/pip','install','-r',CODE/'requirements.txt','-c',CODE/'requirements.lock'])
+            pip_install()
             app('migrate')
             run(['systemctl','start',SERVICE])
             current=config_read();health(int(current['APP_PORT']))
@@ -434,7 +462,7 @@ def update(args):
             run(['systemctl','stop',SERVICE],check=False)
             copy_source(old,CODE)
             state=Path(temp)/'state';state.mkdir();extract_backup(rollback,state);replace_state(state)
-            run([CODE/'.venv/bin/pip','install','-r',CODE/'requirements.txt','-c',CODE/'requirements.lock'],check=False)
+            pip_install(check=False)
             run(['systemctl','start',SERVICE],check=False)
             print('Upgrade failed. Previous source and database restored. Verify service health; backup:',rollback)
             raise

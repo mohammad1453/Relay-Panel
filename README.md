@@ -78,7 +78,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/
   --tunnel-http --origin http://localhost:8095 --port 8095
 ```
 
-To install a specific version, add `--version v1.0.0`. Full details: [installation guide](docs/INSTALL.en.md).
+To install a specific version, add `--version v1.0.0`. If the server cannot reach GitHub or pypi.org directly (for example in Iran), add `--proxy http://127.0.0.1:10808`; see [Installing behind a proxy](docs/INSTALL.en.md#installing-behind-a-proxy). Full details: [installation guide](docs/INSTALL.en.md).
 
 ## Update
 

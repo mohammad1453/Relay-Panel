@@ -6,6 +6,21 @@ All notable changes to Relay are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-28
+
+### Fixed
+- Updating failed on servers that cannot reach pypi.org (for example in Iran)
+  with "Temporary failure in name resolution" for `files.pythonhosted.org`.
+  Releases now include the Python packages Relay needs, and updates install
+  them without internet when nothing compiled has changed.
+- The health check after an update no longer goes through a download proxy
+  set in the environment.
+
+### Added
+- `--proxy http://HOST:PORT` option for the online installer, to download
+  through a 3X-UI `mixed`/`http` inbound. A clear hint is shown when packages
+  cannot be downloaded.
+
 ## [1.1.1] - 2026-10-27
 
 ### Added
@@ -115,7 +130,8 @@ to schema 3 automatically.
 
 Initial public version.
 
-[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/mohammad1453/Relay-Panel/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mohammad1453/Relay-Panel/releases/tag/v1.0.0

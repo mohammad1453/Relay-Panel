@@ -8,6 +8,8 @@
 #
 #   --version vX.Y.Z   install that release instead of the latest one
 #   --uninstall        remove Relay (data is kept unless you add --purge-data)
+#   --proxy URL        download through an HTTP proxy, e.g. --proxy http://127.0.0.1:10808
+#                      (for servers that cannot reach GitHub or pypi.org directly)
 #   anything else      passed to install.sh, e.g. --public-http --origin ... --port 8095
 #
 # Releases are built by GitHub Actions from version tags; see docs/RELEASING.md.
@@ -17,6 +19,7 @@ REPO="mohammad1453/Relay-Panel"
 CODE_DIR="/opt/3xui-reseller"
 VERSION=""
 UNINSTALL=0
+PROXY=""
 PASS=()
 
 red() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
@@ -29,12 +32,25 @@ while [ $# -gt 0 ]; do
     --version) [ $# -ge 2 ] || die "--version needs a value like v1.0.0"; VERSION="$2"; shift 2 ;;
     --version=*) VERSION="${1#*=}"; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0" 2>/dev/null || true; exit 0 ;;
+    --proxy) [ $# -ge 2 ] || die "--proxy needs a value like http://127.0.0.1:10808"; PROXY="$2"; shift 2 ;;
+    --proxy=*) PROXY="${1#*=}"; shift ;;
+    -h|--help) sed -n '2,17p' "$0" 2>/dev/null || true; exit 0 ;;
     *) PASS+=("$1"); shift ;;
   esac
 done
 
 [ "$(uname -s)" = "Linux" ] || die "Relay installs on a Linux VPS."
+
+if [ -n "$PROXY" ]; then
+  case "$PROXY" in
+    http://*|https://*) ;;
+    *) die "--proxy must start with http:// (a 3X-UI 'mixed' or 'http' inbound works), e.g. http://127.0.0.1:10808" ;;
+  esac
+  # curl and pip download through the proxy; local checks on this server never use it.
+  export http_proxy="$PROXY" https_proxy="$PROXY" HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY"
+  export no_proxy="127.0.0.1,localhost,::1" NO_PROXY="127.0.0.1,localhost,::1"
+  info "Downloading through the proxy $PROXY"
+fi
 [ "$(id -u)" -eq 0 ] || die "Run as root, for example: sudo bash <(curl -Ls https://raw.githubusercontent.com/$REPO/main/install-online.sh)"
 
 if [ "$UNINSTALL" -eq 1 ]; then
