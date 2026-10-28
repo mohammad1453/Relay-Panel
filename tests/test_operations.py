@@ -261,3 +261,43 @@ def test_version_file_is_single_source():
     parts=version.split('.')
     assert len(parts)==3 and all(p.isdigit() for p in parts)
     assert f'## [{version}]' in (Path(__file__).parents[1]/'CHANGELOG.md').read_text()
+
+
+def test_pip_uses_bundled_wheels_first_and_falls_back(tmp_path,monkeypatch,capsys):
+    monkeypatch.setattr(ops,'CODE',tmp_path)
+    calls=[]
+    results=iter([0])
+    monkeypatch.setattr(ops,'run',lambda args,check=True,**kw:(calls.append([str(a) for a in args]),SimpleNamespace(returncode=next(results)))[1])
+    ops.pip_install()
+    assert len(calls)==1 and '--no-index' not in calls[0]   # no wheels folder: straight to pypi
+    (tmp_path/'wheels').mkdir()
+    calls.clear();results=iter([0])
+    ops.pip_install()
+    assert len(calls)==1 and '--no-index' in calls[0]  # everything was in the release
+    calls.clear();results=iter([1,0])
+    ops.pip_install()
+    assert '--no-index' in calls[0] and '--no-index' not in calls[1] and '--find-links' in calls[1]
+    calls.clear();results=iter([1,1])
+    with pytest.raises(RuntimeError):
+        ops.pip_install()
+    assert '--proxy http://127.0.0.1:10808' in capsys.readouterr().out
+    calls.clear();results=iter([1,1])
+    ops.pip_install(check=False)   # the rollback path never raises
+
+
+def test_copy_source_replaces_old_wheels(tmp_path):
+    source,dest=tmp_path/'src',tmp_path/'dst'
+    for name in ('reseller','deploy','docs'):
+        (source/name).mkdir(parents=True)
+    for name in ('VERSION','requirements.txt','requirements.lock','requirements-dev.txt','README.md','.env.example','install.sh','update.sh','backup.sh','restore.sh','status.sh','uninstall.sh'):
+        (source/name).write_text('x')
+    ops.copy_source(source,dest)            # a release without wheels still works
+    (dest/'wheels').mkdir();(dest/'wheels'/'old-1.0-py3-none-any.whl').write_text('old')
+    (source/'wheels').mkdir();(source/'wheels'/'new-2.0-py3-none-any.whl').write_text('new')
+    ops.copy_source(source,dest)
+    assert [p.name for p in (dest/'wheels').iterdir()]==['new-2.0-py3-none-any.whl']
+
+
+def test_health_check_ignores_download_proxy(monkeypatch):
+    monkeypatch.setenv('http_proxy','http://127.0.0.1:9')
+    assert not any(isinstance(h,ops.urllib.request.ProxyHandler) and h.proxies for h in ops.LOCAL.handlers)

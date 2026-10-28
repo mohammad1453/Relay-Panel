@@ -131,6 +131,20 @@ cd /opt/3xui-reseller
 sudo -u xui-reseller .venv/bin/python -m reseller.manage unlock-restored --env /etc/3xui-reseller/app.env
 ```
 
+## Installing behind a proxy
+
+Some servers (for example in Iran) cannot reach `pypi.org` or GitHub directly. You see errors like *"Failed to establish a new connection: Temporary failure in name resolution"* for `files.pythonhosted.org`. A failed update rolls back by itself, so Relay keeps running the previous version.
+
+From version 1.1.2, releases include the Python packages Relay needs, so **updates** normally work without reaching pypi.org. A fresh install, or an update that needs a new compiled package, still downloads from the internet.
+
+To download through a proxy, use a 3X-UI `mixed` (or `http`) inbound that listens on `127.0.0.1` and is routed through a server abroad. The steps are in [TELEGRAM.md](TELEGRAM.md#way-a-through-your-foreign-server-with-3x-ui-recommended-if-you-have-one). Then:
+
+```bash
+bash <(curl -Ls -x http://127.0.0.1:10808 https://raw.githubusercontent.com/mohammad1453/Relay-Panel/main/install-online.sh) --proxy http://127.0.0.1:10808
+```
+
+`--proxy` is used only for downloading (curl and pip). Relay's own checks on `127.0.0.1` never go through it. Use `http://`, not `socks5://`, because pip cannot use SOCKS proxies.
+
 ## Updates and rollback
 
 Run the online installer again; on an installed system it updates to the latest release (or the one given with `--version`):
