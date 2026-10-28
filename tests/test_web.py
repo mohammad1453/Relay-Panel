@@ -299,6 +299,7 @@ def test_sync_now_for_resellers_is_rate_limited(client):
 
 def test_admin_accepts_3xui_values_from_the_customer_page(client,setup):
     _,panel,db,service,_,actor,_=setup
+    service.set_remote_changes_mode(db.one("SELECT * FROM users WHERE role='admin'"), 'ask')
     op=sale(service,actor)
     panel.rows['customer-one']['comment']='edited in panel'
     service.refresh()
@@ -328,6 +329,7 @@ def test_admin_deletes_reseller_with_customers(client,setup):
 
 def test_admin_removes_customer_that_needs_attention(client,setup):
     _,panel,db,service,_,actor,_=setup
+    service.set_remote_changes_mode(db.one("SELECT * FROM users WHERE role='admin'"), 'ask')
     op=sale(service,actor)
     panel.rows['customer-one']['id']=999
     service.refresh()

@@ -239,6 +239,8 @@ a.stat:hover { border-color: var(--border-strong); text-decoration: none; transf
 .callout-warning .callout-icon { color: var(--warning); }
 .callout-danger { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .callout-danger .callout-icon { color: var(--danger); }
+.callout-info { border-color: color-mix(in srgb, var(--info) 45%, var(--border)); }
+.callout-info .callout-icon { color: var(--info); }
 
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 13px; color: var(--text-2); margin-bottom: 14px; }

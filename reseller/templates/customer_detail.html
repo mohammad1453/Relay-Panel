@@ -36,6 +36,22 @@
   {% if failed_create and writable %}<div class="actions-row"><form method="post" action="/operations/{{ failed_create.id }}/retry">{{ ui.csrf_field() }}<input type="hidden" name="operation_id" value="{{ operation_id }}"><button class="btn btn-primary btn-sm" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('retry_unsent') }}</span></button></form></div>{% endif %}
   </div>
 </div>
+{% elif undo %}
+<div class="callout callout-info">
+  {{ ui.icon('sync','callout-icon') }}
+  <div class="callout-body">
+    <b>Changed in 3X-UI {{ rel(undo.at) }}</b>
+    <p>Relay copied the new values from 3X-UI. This was free for the reseller.</p>
+    {% if undo_rows %}<div class="table-wrap"><table class="table table-compact diff">
+      <thead><tr><th>{{ t('field') }}</th><th>Before</th><th>Now</th></tr></thead>
+      <tbody>{% for field, before, after in undo_rows %}<tr><td>{{ field }}</td><td><span class="old">{{ before }}</span></td><td><span class="new">{{ after }}</span></td></tr>{% endfor %}</tbody>
+    </table></div>{% endif %}
+    <div class="actions-row">
+      <form method="post" action="/customers/{{ customer.id }}/undo-remote">{{ ui.csrf_field() }}{{ ui.confirm_button('Undo: put the old values back', 'Click again to undo', 'ghost', 'sync') }}</form>
+      <small class="muted">Writes the previous values back to 3X-UI. Available for 7 days.</small>
+    </div>
+  </div>
+</div>
 {% elif customer.issue %}
 <div class="callout callout-{{ 'warning' if customer.issue=='suspension_pending' else 'danger' }}">
   {{ ui.icon('alert','callout-icon') }}

@@ -15,6 +15,9 @@ GIB = 1024**3
 from .domain_constants import PROTOCOLS  # noqa: E402  (re-exported for templates and tests)
 # Issues that mean the 3X-UI copy of a customer no longer matches Relay.
 DRIFT_ISSUES = ('remote_changed', 'remote_identity', 'remote_drift')
+# Values shown when comparing a customer before and after a change made in 3X-UI.
+DIFF_FIELDS = ('totalGB', 'expiryTime', 'enable', 'comment', 'group')
+UNDO_SECONDS = 7 * 86400
 # 3X-UI client group for customers the admin creates directly (they have no reseller plan).
 ADMIN_GROUP = 'RelayPanel'
 # A sent create/update whose client is missing on this many full syncs is treated as gone.
@@ -406,11 +409,26 @@ class Service:
                 and remote.get('group', payload['group']) == payload['group'])
 
     @staticmethod
+    def _gift(db, customer_id):
+        """Data given to this customer for free in 3X-UI that the reseller has not reduced away yet."""
+        row = db.execute('SELECT value FROM state WHERE key=?',(f'gift:{customer_id}',)).fetchone()
+        return int(row[0]) if row else 0
+
+    @staticmethod
+    def _set_gift(db, customer_id, amount):
+        if amount > 0:
+            db.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(f'gift:{customer_id}',str(int(amount))))
+        else:
+            db.execute('DELETE FROM state WHERE key=?',(f'gift:{customer_id}',))
+
+    @staticmethod
     def _refund_amount(db, user_id, grant_id, customer_id, old_amount, new_amount, used):
         """Return only this customer's unused, previously sold quota on this grant."""
         if used is None:
             return 0
         desired = max(0, old_amount - max(new_amount, used))
+        # A gift from the admin is given up first; only paid data comes back to the plan.
+        desired -= min(Service._gift(db, customer_id), desired)
         if desired <= 0:
             return 0
         sold = db.execute("SELECT coalesce(sum(amount),0) FROM ledger WHERE user_id=? AND grant_id=? AND customer_id=? AND kind='sale'",
@@ -472,6 +490,8 @@ class Service:
             if can_send and op['kind']=='update':
                 desired['refund'] = self._refund_amount(db,local['user_id'],op['grant_id'],local['id'],
                                                         local['package'],desired['client']['totalGB'],used_bytes)
+                if used_bytes is not None:
+                    desired['gift_used'] = min(self._gift(db,local['id']), max(0, local['package']-max(desired['client']['totalGB'],used_bytes)))
             changed = db.execute("UPDATE operations SET status='sent',desired=?,updated=? WHERE id=? AND status='reserved'",(dumps(desired),now(),operation_id)).rowcount if can_send else 0
         if not can_send:
             self.release(operation_id,'plan_expired',unsent=True)
@@ -606,6 +626,8 @@ class Service:
                     self._entry(db,local['user_id'],op['grant_id'],local['id'],oid,'sale',op['charge'],op['actor'])
                 if refund:
                     self._entry(db,local['user_id'],op['grant_id'],local['id'],oid,'refund',refund,op['actor'])
+                if desired.get('gift_used'):
+                    self._set_gift(db,local['id'],self._gift(db,local['id'])-int(desired['gift_used']))
                 if op['kind']=='update':
                     for iid in desired['inboundIds']:
                         db.execute("INSERT INTO placements(customer_id,inbound_id,status) VALUES(?,?,'verified') ON CONFLICT(customer_id,inbound_id) DO UPDATE SET status='verified'",(local['id'],iid))
@@ -639,6 +661,7 @@ class Service:
             raise RuleError('sync_busy',409)
         try:
             self._refresh()
+            self.auto_accept()
         except RemoteError as exc:
             self._set_state('sync_error',f'{exc.code}:{now()}')
             raise
@@ -863,15 +886,22 @@ class Service:
     ACCEPT_FIELDS = ('totalGB','expiryTime','enable','comment','subId','group','password','auth','flow','security',
                      'secret','privateKey','publicKey','preSharedKey','keepAlive','adTag','forwardedPorts')
 
-    def accept_remote(self, actor, customer_id):
-        """Make Relay match a customer that was edited directly in 3X-UI."""
+    def accept_remote(self, actor, customer_id, auto=False, records=None):
+        """Make Relay match a customer that was edited directly in 3X-UI.
+
+        Changes made in 3X-UI are a gift from the admin: the reseller's plan is never
+        charged or refunded for them. auto=True is the automatic "3X-UI wins" mode; it
+        keeps the previous values so the admin can undo the change."""
         if actor['role'] != 'admin':
             raise RuleError('forbidden',403)
-        records = self.remote.clients()
+        records = self.remote.clients() if records is None else records
         with self.db.transaction() as db:
             local = db.execute('SELECT * FROM customers WHERE id=?',(customer_id,)).fetchone()
             if not local or local['status'] != 'active':
                 raise RuleError('not_found',404)
+            if auto and local['issue'] not in DRIFT_ISSUES:
+                # Already handled (e.g. a sync and a settings change raced): keep the first undo copy.
+                raise RuleError('invalid_operation',409)
             if db.execute("SELECT 1 FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(customer_id,)).fetchone():
                 raise RuleError('reconcile_required',409)
             remote = next((r for r in records if r['email'] == local['email']),None)
@@ -887,6 +917,7 @@ class Service:
                 payload['allowedIPs'] = json.loads(remote['allowedIPs']) if isinstance(remote['allowedIPs'],str) else remote['allowedIPs']
             known = {r[0] for r in db.execute('SELECT id FROM inbounds')}
             ids = sorted({i for i in remote['inboundIds'] if i in known})
+            previous_ids = [r[0] for r in db.execute('SELECT inbound_id FROM placements WHERE customer_id=?',(customer_id,))]
             for field in ('id','subId','password','auth'):
                 value = payload.get(field)
                 if not value:
@@ -898,17 +929,139 @@ class Service:
                 db.execute('INSERT OR IGNORE INTO identities VALUES(?,?,?)',(field,fingerprint,customer_id))
             # Unlimited (0) cannot be stored as a package; keep the sold size then.
             package = payload.get('totalGB') if isinstance(payload.get('totalGB'),int) and payload['totalGB'] > 0 else local['package']
+            gift_before = self._gift(db, customer_id)
+            if local['user_id'] != actor['id']:
+                # Free for the reseller: extra data is a gift; data taken away is not refunded.
+                self._set_gift(db, customer_id, gift_before + package - local['package'])
             db.execute('DELETE FROM placements WHERE customer_id=?',(customer_id,))
             db.executemany("INSERT INTO placements(customer_id,inbound_id,status) VALUES(?,?,'verified')",[(customer_id,i) for i in ids])
             db.execute("UPDATE customers SET payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue='',remote_expiry=? WHERE id=?",
                        (dumps(payload),package,remote['id'],payload.get('id'),payload['subId'],remote.get('expiryTime'),customer_id))
             db.execute('DELETE FROM state WHERE key=?',(f'drift:{customer_id}',))
+            if auto:
+                old = json.loads(local['payload'])
+                before = {'p': {k: old.get(k) for k in DIFF_FIELDS},
+                          'c': {'sub_id': local['sub_id'], 'uuid': local['uuid'], 'placement_ids': sorted(previous_ids)},
+                          'r': {k: remote.get(k) for k in (*DIFF_FIELDS, 'subId', 'uuid', 'inboundIds')}}
+                undo = {'payload': old, 'package': local['package'], 'placements': sorted(previous_ids), 'remote_id': local['remote_id'],
+                        'uuid': local['uuid'], 'sub_id': local['sub_id'], 'gift': gift_before, 'at': now()}
+                db.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(f'undo:{customer_id}',dumps(undo)))
             grant = db.execute('SELECT id FROM grants WHERE user_id=? ORDER BY id DESC LIMIT 1',(local['user_id'],)).fetchone()
             if grant:
                 # Zero-amount note: a change made in 3X-UI is not charged to the reseller.
                 db.execute("INSERT INTO ledger(user_id,grant_id,customer_id,kind,amount,actor,created) VALUES(?,?,?,'adjust',0,?,?)",
                            (local['user_id'],grant['id'],customer_id,actor['id'],now()))
-            audit(db,actor['id'],'customer_accept_remote',dumps({'customer':customer_id,'old':local['package'],'new':package}))
+            if auto:
+                audit(db,None,'customer_auto_accepted',dumps({'customer':customer_id,'old':local['package'],'new':package,
+                      'identity':payload['subId']!=local['sub_id'] or payload.get('id')!=local['uuid'],**before}))
+            else:
+                db.execute('DELETE FROM state WHERE key=?',(f'undo:{customer_id}',))
+                audit(db,actor['id'],'customer_accept_remote',dumps({'customer':customer_id,'old':local['package'],'new':package}))
+
+    # ----- "3X-UI wins" mode, undo, and the restore lock ----------------------------
+
+    def remote_changes_mode(self):
+        """'auto': accept changes made in 3X-UI and notify (default). 'ask': wait for the admin."""
+        row = self.db.one("SELECT value FROM state WHERE key='setting:remote_changes'")
+        return 'ask' if row and row['value'] == 'ask' else 'auto'
+
+    def set_remote_changes_mode(self, actor, mode):
+        if actor['role'] != 'admin' or mode not in ('auto', 'ask'):
+            raise RuleError('forbidden' if actor['role'] != 'admin' else 'invalid_input', 403 if actor['role'] != 'admin' else 400)
+        with self.db.transaction() as db:
+            db.execute("INSERT INTO state(key,value) VALUES('setting:remote_changes',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(mode,))
+            audit(db,actor['id'],'settings_update','remote_changes:'+mode)
+        if mode == 'auto':
+            self.auto_accept()
+
+    def auto_accept(self):
+        """Accept every customer that was changed in 3X-UI, when the admin chose "3X-UI wins".
+        Customers that can't be accepted (e.g. their new ID belongs to another customer) stay
+        under Needs attention."""
+        if self.remote_changes_mode() != 'auto':
+            return 0
+        rows = self.db.all("SELECT id FROM customers WHERE status='active' AND issue IN (%s)" % ','.join('?'*len(DRIFT_ISSUES)), DRIFT_ISSUES)
+        if not rows:
+            return 0
+        admin = self.db.one("SELECT * FROM users WHERE role='admin' AND deleted=0 ORDER BY id LIMIT 1")
+        if not admin:
+            return 0
+        records, done = self.remote.clients(), 0
+        for row in rows:
+            try:
+                self.accept_remote(admin, row['id'], auto=True, records=records)
+                done += 1
+            except RuleError:
+                continue
+        return done
+
+    def undo_info(self, customer_id):
+        row = self.db.one('SELECT value FROM state WHERE key=?',(f'undo:{customer_id}',))
+        if not row:
+            return None
+        data = json.loads(row['value'])
+        return data if data.get('at', 0) > now() - UNDO_SECONDS else None
+
+    def undo_remote(self, actor, customer_id):
+        """Put back the values Relay had before a change made in 3X-UI was accepted
+        automatically. Free for the reseller, like the change itself."""
+        if actor['role'] != 'admin':
+            raise RuleError('forbidden',403)
+        undo = self.undo_info(customer_id)
+        if not undo:
+            raise RuleError('undo_unavailable',409)
+        # Hold the sync lock so a sync can't accept the half-written state again.
+        if not self.sync_lock.acquire(timeout=30):
+            raise RuleError('sync_busy',409)
+        try:
+            local = self.db.one('SELECT * FROM customers WHERE id=?',(customer_id,))
+            if not local or local['status'] != 'active':
+                raise RuleError('not_found',404)
+            if self.db.one("SELECT 1 FROM operations WHERE customer_id=? AND status IN ('reserved','sent','uncertain')",(customer_id,)):
+                raise RuleError('reconcile_required',409)
+            remote = next((r for r in self.remote.clients() if r['email'] == local['email']),None)
+            if not remote:
+                raise RuleError('remote_missing',409)
+            known = {r['id'] for r in self.db.all('SELECT id FROM inbounds')}
+            want = {i for i in undo['placements'] if i in known}
+            have = set(remote['inboundIds'])
+            if not want:
+                raise RuleError('inbound_denied',409)
+            self.remote.update(local['email'], undo['payload'])
+            steps = [('attach', sorted(want - have)), ('detach', sorted(have - want))]
+            if getattr(self.remote, 'detach_first', False):
+                steps.reverse()
+            for step, inbound_ids in steps:
+                if inbound_ids:
+                    getattr(self.remote, step)(local['email'], inbound_ids)
+            check = next((r for r in self.remote.clients() if r['email'] == local['email']),None)
+            if not check or set(check['inboundIds']) != want or not self._matches(check, undo['payload']):
+                raise RuleError('remote_rejected',502)
+            with self.db.transaction() as db:
+                db.execute('DELETE FROM placements WHERE customer_id=?',(customer_id,))
+                db.executemany("INSERT INTO placements(customer_id,inbound_id,status) VALUES(?,?,'verified')",[(customer_id,i) for i in sorted(want)])
+                db.execute("UPDATE customers SET payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue='',remote_expiry=? WHERE id=?",
+                           (dumps(undo['payload']),undo['package'],check.get('id', undo['remote_id']),undo['uuid'],undo['sub_id'],check.get('expiryTime'),customer_id))
+                for field in ('id','subId','password','auth'):
+                    value = undo['payload'].get(field)
+                    if value:
+                        db.execute('INSERT OR IGNORE INTO identities VALUES(?,?,?)',(field,hashlib.sha256(str(value).encode()).hexdigest(),customer_id))
+                self._set_gift(db, customer_id, int(undo.get('gift', 0)))
+                db.execute('DELETE FROM state WHERE key IN (?,?)',(f'undo:{customer_id}',f'drift:{customer_id}'))
+                audit(db,actor['id'],'customer_undo_remote',dumps({'customer':customer_id,'old':local['package'],'new':undo['package']}))
+        finally:
+            self.sync_lock.release()
+
+    def sales_locked(self):
+        return bool(self.db.one("SELECT 1 FROM state WHERE key='write_lock'"))
+
+    def unlock_sales(self, actor):
+        """Admin acknowledgement after a backup restore: sales may start again."""
+        if actor['role'] != 'admin':
+            raise RuleError('forbidden',403)
+        with self.db.transaction() as db:
+            if db.execute("DELETE FROM state WHERE key='write_lock'").rowcount:
+                audit(db,actor['id'],'restore_unlock')
 
     def force_remove(self, actor, customer_id):
         """Admin delete that works in every state: removes the client from 3X-UI if it

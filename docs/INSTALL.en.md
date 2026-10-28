@@ -124,7 +124,7 @@ sudo ls -lh /var/backups/3xui-reseller/
 sudo bash /opt/3xui-reseller/restore.sh --archive /var/backups/3xui-reseller/REPLACE_WITH_BACKUP.tar.gz
 ```
 
-Backups use SQLite's consistent online backup API. Keep encrypted off-host copies; root-readable archives contain recovery secrets. Suggested retention is seven daily and four weekly backups; retention deletion is operator-managed, never automatic. Restore requires typing `RESTORE`, validates checksums/schema, creates a pre-restore backup, revokes sessions and locks sales. The independent master is not restored. Reconcile post-backup sales and correct grant accounting before explicitly unlocking:
+Backups use SQLite's consistent online backup API. Keep encrypted off-host copies; root-readable archives contain recovery secrets. Suggested retention is seven daily and four weekly backups; retention deletion is operator-managed, never automatic. Restore requires typing `RESTORE`, validates checksums/schema, creates a pre-restore backup, revokes sessions and locks sales. The independent master is not restored. Check customers and reseller plans, then sign in as admin and press **Unlock sales** on the **Needs attention** page. An update that fails and rolls back by itself does **not** pause sales (from 1.2.0), because it restores a copy taken with Relay stopped. The command-line unlock still works:
 
 ```bash
 cd /opt/3xui-reseller

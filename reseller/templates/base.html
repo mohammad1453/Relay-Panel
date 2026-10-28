@@ -46,6 +46,7 @@
       </div>
     </header>
     <main class="content" id="content">
+      {% if sales_locked and request.url.path != base_path+'/attention' %}{{ ui.alert('warning', 'Sales are paused after a backup restore. ' + ('Check the customers and plans, then unlock sales on the Needs attention page.' if user.role=='admin' else 'The admin can unlock them.'), false) }}{% endif %}
       {% if message %}{{ ui.alert('success', t(message)) }}{% endif %}
       {% if error %}{{ ui.alert('danger', t(error)) }}{% endif %}
       {% if page_error %}{{ ui.alert('danger', t(page_error)) }}{% endif %}

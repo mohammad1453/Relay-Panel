@@ -22,7 +22,8 @@ CATEGORY_LABELS = {'customers': 'Customers', 'plan': 'Plans & resellers', 'signi
 
 # Events a reseller sees even when the system (not they) caused them, if it is about their customer.
 SYSTEM_CUSTOMER_EVENTS = ('customer_remote_missing', 'customer_removed_during_setup', 'customer_force_removed',
-                          'customer_accept_remote', 'customer_create', 'customer_update', 'customer_delete')
+                          'customer_accept_remote', 'customer_auto_accepted', 'customer_undo_remote',
+                          'customer_create', 'customer_update', 'customer_delete')
 
 
 def gb(value):
@@ -144,6 +145,12 @@ def describe(e, names, date):
         parts, tone, icon = [who, (' accepted the 3X-UI values for ', False), (name, True)], 'success', 'check'
         if data.get('old') and data.get('new') and data['old'] != data['new']:
             parts += [(f" (data limit {gb(data['old'])} → {gb(data['new'])})", False)]
+    elif action == 'customer_auto_accepted':
+        parts, tone, icon = [('Customer ', False), (name, True), (' was changed in 3X-UI; Relay now uses the new values', False)], 'info', 'check'
+        if data.get('old') and data.get('new') and data['old'] != data['new']:
+            parts += [(f" (data limit {gb(data['old'])} → {gb(data['new'])}, free for the reseller)", False)]
+    elif action == 'customer_undo_remote':
+        parts, tone, icon = [who, (' undid the 3X-UI change of ', False), (name, True)], 'info', 'sync'
     elif action == 'customer_remote_missing':
         parts, tone, icon = [('Customer ', False), (name, True), (' was deleted in 3X-UI, so Relay removed it too', False)], 'warning', 'trash'
     elif action == 'customer_removed_during_setup':
@@ -275,6 +282,11 @@ def customer_state(c, p, current=None):
     if expiry > 0 and expiry <= (current + 3 * 86400) * 1000:
         return 'expiring', 'warning'
     return 'active', 'success'
+
+
+def change_rows(data, inbound_names, date):
+    """Rows of (field, before, after) for a customer that Relay accepted from 3X-UI."""
+    return drift_diff(data.get('c') or {}, data.get('p') or {}, data.get('r'), inbound_names, date)
 
 
 def drift_diff(c, p, snapshot, inbound_names, date):

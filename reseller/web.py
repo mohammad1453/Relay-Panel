@@ -197,7 +197,8 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         return db.one("""SELECT (SELECT count(*) FROM customers c WHERE (c.status='active' AND c.issue!='' AND NOT EXISTS(
                              SELECT 1 FROM operations o WHERE o.customer_id=c.id AND o.status IN ('sent','uncertain'))) OR c.status='failed')
                          + (SELECT count(*) FROM operations WHERE status IN ('sent','uncertain'))
-                         + (SELECT count(*) FROM requests WHERE status='pending') n""")['n']
+                         + (SELECT count(*) FROM requests WHERE status='pending')
+                         + (SELECT count(*) FROM state WHERE key='write_lock') n""")['n']
 
     def render(request,name,status=200,**context):
         user=request.state.user
@@ -225,6 +226,7 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
             'error':error if known(error) else ('error' if error else ''),'PROTOCOLS':service.protocols,'base_path':config.base_path,
             'form_data':{},'field_errors':{},'page_error':'','sync':sync_status() if user else None,
             'attention_total':attention_count() if user and user['role']=='admin' else 0,
+            'sales_locked':bool(user) and service.sales_locked(),
             'version':__version__,'subscription_link_for':subscription_link_for,'quick_volumes':QUICK_VOLUMES,'quick_days':QUICK_DAYS,'link':link,
         }
         base.update(context)
@@ -870,8 +872,10 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         percent=min(100,round((c['used'] or 0)*100/c['package'])) if c['package'] else 0
         feed=[e for e in activity.feed(db,user,date,limit=60) if e['link']==f'/customers/{cid}'][:10]
         failed_create=next((o for o in ops if o['status']=='failed' and o['kind']=='create'),None) if c['status']=='failed' else None
+        undo=service.undo_info(cid) if user['role']=='admin' and c['status']=='active' else None
+        undo_rows=undo_diff(service.db.one("SELECT subject FROM audit WHERE action='customer_auto_accepted' AND json_extract(subject,'$.customer')=? ORDER BY id DESC LIMIT 1",(cid,)),known_ids) if undo else []
         return render(request,'customer_detail.html',customer=c,p=p,placements=placements,state=state,tone=tone,ops=ops,pending=pending,
-                      diff=diff,owner=owner,percent=percent,feed=feed,failed_create=failed_create)
+                      diff=diff,owner=owner,percent=percent,feed=feed,failed_create=failed_create,undo=undo,undo_rows=undo_rows)
 
     @app.get('/customers/{cid}/edit')
     def customer_edit(request:Request,cid:int):
@@ -928,6 +932,15 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         user=require(request,True)
         await run_in_threadpool(service.accept_remote,user,cid)
         return redirect(back(request,f'/customers/{cid}'),'accepted')
+
+    @app.post('/customers/{cid}/undo-remote')
+    async def customer_undo_remote(request:Request,cid:int):
+        user=require(request,True)
+        await run_in_threadpool(service.undo_remote,user,cid)
+        return redirect(back(request,f'/customers/{cid}'),'undone')
+
+    def undo_diff(row,names):
+        return activity.change_rows(activity.parse(row['subject']),names,date) if row else []
 
     def checked_links(user,cid):
         c=customer_view(user,cid)
@@ -1061,7 +1074,7 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         row=db.one("SELECT value FROM state WHERE key='setting:sub_url'")
         ctx={'sub_url':row['value'] if row else '','env_sub_url':config.sub_url,'example':subscription_link_for('SUBSCRIPTION-ID'),
              'tg':telegram.status(),'tg_has_token':bool(telegram.setting('token')),'tg_proxy':telegram.setting('proxy'),'tg_api':telegram.setting('api'),
-             'tg_hour':telegram.setting('report_hour','9'),'tg_linked':telegram.linked(request.state.user['id'])}
+             'tg_hour':telegram.setting('report_hour','9'),'remote_changes':service.remote_changes_mode(),'tg_linked':telegram.linked(request.state.user['id'])}
         ctx.update(context)
         return render(request,'settings.html',status=status,**ctx)
 
@@ -1109,6 +1122,13 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
                 telegram.check()
             except TelegramError as exc:
                 return settings_render(request,status=400,page_error='telegram_unreachable',tg_error_detail=str(exc))
+        return redirect('/settings','saved')
+
+    @app.post('/settings/remote-changes')
+    async def settings_remote_changes(request:Request):
+        user=require(request,True)
+        form=await request.form()
+        service.set_remote_changes_mode(user,str(form.get('mode','')))
         return redirect('/settings','saved')
 
     @app.post('/settings/telegram/test')
@@ -1207,7 +1227,12 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         requests=db.all("SELECT r.*,u.username FROM requests r JOIN users u ON u.id=r.user_id WHERE r.status='pending' ORDER BY r.id")
         for r in requests:
             r['plan']=current_plan(r['user_id'])
-        return render(request,'attention.html',items=attention_items(),requests=requests)
+        return render(request,'attention.html',items=attention_items(),requests=requests,locked=service.sales_locked())
+
+    @app.post('/sales/unlock')
+    def sales_unlock(request:Request):
+        service.unlock_sales(require(request,True))
+        return redirect('/attention','sales_unlocked')
 
     @app.get('/operations')
     def operations(request:Request):

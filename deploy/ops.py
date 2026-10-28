@@ -396,8 +396,12 @@ def restore(args):
         print('Restore replaces ONLY:',DATA/'app.db',CONFIG/'app.env')
         if input('Type RESTORE to proceed: ')!='RESTORE':
             fail('Cancelled')
-        rollback=backup()
         run(['systemctl','stop',SERVICE])
+        try:
+            rollback=backup()
+        except Exception:
+            run(['systemctl','start',SERVICE],check=False)
+            raise
         try:
             replace_state(temp)
             app('migrate')
@@ -406,13 +410,16 @@ def restore(args):
         except Exception:
             run(['systemctl','stop',SERVICE],check=False)
             with tempfile.TemporaryDirectory(prefix='relay-rollback-') as old:
-                extract_backup(rollback,Path(old));replace_state(Path(old))
+                extract_backup(rollback,Path(old));replace_state(Path(old),lock=False)
             run(['systemctl','start',SERVICE],check=False)
             raise
-    print('Restore complete. Reconcile master state before allowing new sales; the independent master was not rolled back.')
+    print('Restore complete. Sales are paused: check that customers and reseller plans look right, then press "Unlock sales" on the Needs attention page (sign in as admin). 3X-UI itself was not rolled back.')
 
 
-def replace_state(source):
+def replace_state(source,lock=True):
+    # lock=True after restoring a user's backup: sales made since that backup may exist only
+    # in 3X-UI, so the admin checks before selling again. An update rollback restores a copy
+    # taken with Relay stopped moments earlier, so nothing can be missing and sales stay open.
     for suffix in ('-wal','-shm'):
         (DATA/('app.db'+suffix)).unlink(missing_ok=True)
     shutil.copy2(source/'app.db',DATA/'app.db')
@@ -423,7 +430,8 @@ def replace_state(source):
     with contextlib.closing(sqlite3.connect(DATA/'app.db')) as conn:
         with conn:
             conn.execute('DELETE FROM sessions')
-            conn.execute("INSERT INTO state VALUES('write_lock','restored') ON CONFLICT(key) DO UPDATE SET value='restored'")
+            if lock:
+                conn.execute("INSERT INTO state VALUES('write_lock','restored') ON CONFLICT(key) DO UPDATE SET value='restored'")
 
 
 def extract_release(archive,expected,destination):
@@ -448,10 +456,15 @@ def update(args):
     with tempfile.TemporaryDirectory(prefix='relay-release-') as temp:
         source=Path(temp)/'source';source.mkdir()
         extract_release(args.archive,args.sha256,source)
-        rollback=backup()
+        # Stop first so the rollback copy holds every sale; a rollback then loses nothing.
+        run(['systemctl','stop',SERVICE])
+        try:
+            rollback=backup()
+        except Exception:
+            run(['systemctl','start',SERVICE],check=False)
+            raise
         old=Path(temp)/'previous'
         copy_source(CODE,old)
-        run(['systemctl','stop',SERVICE])
         try:
             copy_source(source,CODE)
             pip_install()
@@ -461,7 +474,7 @@ def update(args):
         except Exception:
             run(['systemctl','stop',SERVICE],check=False)
             copy_source(old,CODE)
-            state=Path(temp)/'state';state.mkdir();extract_backup(rollback,state);replace_state(state)
+            state=Path(temp)/'state';state.mkdir();extract_backup(rollback,state);replace_state(state,lock=False)
             pip_install(check=False)
             run(['systemctl','start',SERVICE],check=False)
             print('Upgrade failed. Previous source and database restored. Verify service health; backup:',rollback)

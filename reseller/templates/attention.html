@@ -4,7 +4,23 @@
 {% block body %}
 <div class="page-head"><div><h1>{{ t('attention') }}</h1><p class="muted">{{ t('attention_hint') }}</p></div>
 <form method="post" action="/sync">{{ ui.csrf_field() }}<button class="btn btn-ghost" data-working="{{ t('working') }}">{{ ui.icon('sync') }}<span>{{ t('sync_now') }}</span></button></form></div>
-{% if not items and not requests %}
+{% if locked %}
+<section class="card attention-card tone-border-warning">
+  <header class="attention-head">
+    <div class="cell-main"><span class="feed-icon tone-warning">{{ ui.icon('lock') }}</span>
+      <div><b>Sales are paused</b><small class="muted">after a backup restore</small></div></div>
+    <span class="tag tag-warning">Locked</span>
+  </header>
+  <p>A backup was restored, so Relay may not know about customers created or changed in 3X-UI after that backup. Nobody can create or change customers until you unlock sales.</p>
+  <ol class="muted">
+    <li>Press <b>Sync now</b> and look at the customer list: customers deleted in 3X-UI are removed automatically.</li>
+    <li>Open each reseller and check that the plan (data sold and left) looks right. Fix it with <b>Change plan</b> if needed.</li>
+    <li>Then unlock sales.</li>
+  </ol>
+  <form method="post" action="/sales/unlock">{{ ui.csrf_field() }}{{ ui.confirm_button('Unlock sales', 'Click again to unlock sales', 'primary', 'lock') }}</form>
+</section>
+{% endif %}
+{% if not items and not requests and not locked %}
 <section class="card">{{ ui.empty('check', t('all_clear')) }}</section>
 {% endif %}
 {% for r in requests %}

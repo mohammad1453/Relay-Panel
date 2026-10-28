@@ -34,7 +34,8 @@ Press **Save**. The status shows **Connected as @your_bot** when the token works
 
 ## What the admin gets
 
-- Customers changed directly in 3X-UI, with **Accept 3X-UI values** and **Remove** buttons
+- Customers changed directly in 3X-UI: what changed, with an **Undo** button (or, in **Ask me first** mode, **Accept 3X-UI values** and **Remove**)
+- Sales paused after a backup restore
 - Changes that are stuck or failed, with **Check again**
 - Requests for more data from resellers, with **Approve** and **Decline**
 - 3X-UI unreachable for 5 minutes, and back again
@@ -48,6 +49,7 @@ Press **Save**. The status shows **Connected as @your_bot** when the token works
 
 - Plan almost used up, ending soon, ended, renewed
 - Answers to their requests for more data
+- Their customers changed by the admin in 3X-UI, with the new link when it changed
 - Their customers deleted in 3X-UI
 - Bulk changes finished
 - Daily summary: customers expiring soon or out of data
