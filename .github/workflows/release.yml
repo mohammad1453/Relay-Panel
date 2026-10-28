@@ -57,7 +57,7 @@ jobs:
         run: python -m pytest -q
       - name: Download packages to ship with the release
         if: steps.version.outputs.skip != 'true'
-        run: pip download -r requirements.txt -c requirements.lock --only-binary=:all: -d wheels
+        run: "pip download -r requirements.txt -c requirements.lock --only-binary=:all: -d wheels"
       - name: Build release archive
         if: steps.version.outputs.skip != 'true'
         run: python tools/package_release.py
