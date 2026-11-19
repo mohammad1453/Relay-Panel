@@ -6,6 +6,13 @@ All notable changes to Relay are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-19
+
+### Fixed
+- Show the confirmed expiration date immediately after editing a customer.
+- Preserve the exact expiration when editing other fields, and explain when
+  an active first-use package must be edited using its fixed expiration date.
+
 ## [1.2.0] - 2026-10-28
 
 ### Added
@@ -150,7 +157,8 @@ to schema 3 automatically.
 
 Initial public version.
 
-[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/mohammad1453/Relay-Panel/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/mohammad1453/Relay-Panel/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/mohammad1453/Relay-Panel/compare/v1.1.0...v1.1.1

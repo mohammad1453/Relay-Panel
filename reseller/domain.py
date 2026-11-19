@@ -469,7 +469,10 @@ class Service:
                     if desired['client'].get(field) and desired['client'][field]==record.get(remote_field):
                         raise RuleError('identity_conflict')
             if op['kind']=='update' and desired['client']['expiryTime']<0 and remote and remote.get('expiryTime',0)>0:
-                # Preserve the remote activation timestamp; never restart a first-use package during an edit.
+                # An unchanged first-use package may have activated since the form was opened.
+                # A requested duration change must not be reported as saved if we cannot apply it.
+                if desired['client']['expiryTime'] != json.loads(local['payload'])['expiryTime']:
+                    raise RuleError('use_fixed_expiry')
                 desired['client']['expiryTime']=remote['expiryTime']
             remote_traffic = remote.get('traffic') if remote else None
             if isinstance(remote_traffic,dict) and all(isinstance(remote_traffic.get(k),int) and remote_traffic[k]>=0 for k in ('up','down')):
@@ -645,8 +648,8 @@ class Service:
                     if remote.get('allowedIPs'):
                         payload['allowedIPs'] = json.loads(remote['allowedIPs']) if isinstance(remote['allowedIPs'],str) else remote['allowedIPs']
                     payload['expiryTime'] = remote['expiryTime']
-                db.execute('UPDATE customers SET status=?,payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue=? WHERE id=?',
-                           ('deleted' if op['kind']=='delete' else 'active',dumps(payload),payload['totalGB'] or local['package'],remote['id'] if remote else local['remote_id'],payload.get('id'),payload['subId'],'',local['id']))
+                db.execute('UPDATE customers SET status=?,payload=?,package=?,remote_id=?,uuid=?,sub_id=?,issue=?,remote_expiry=? WHERE id=?',
+                           ('deleted' if op['kind']=='delete' else 'active',dumps(payload),payload['totalGB'] or local['package'],remote['id'] if remote else local['remote_id'],payload.get('id'),payload['subId'],'',remote['expiryTime'] if remote else None,local['id']))
                 db.execute("DELETE FROM state WHERE key IN (?,?)",(f"drift:{local['id']}",f"absent:{oid}"))
                 if op['kind']=='delete':
                     free_customer_name(db, local['id'])

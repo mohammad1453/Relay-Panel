@@ -33,7 +33,7 @@ from .xui import XUI, RemoteError
 FORM_ERRORS = (RuleError, RemoteError, ValueError, sqlite3.IntegrityError)
 # Which form field an error code belongs to.
 FIELD_OF = {
-    'invalid_volume': 'volume', 'insufficient_quota': 'volume', 'invalid_expiry': 'expiry',
+    'invalid_volume': 'volume', 'insufficient_quota': 'volume', 'invalid_expiry': 'expiry', 'use_fixed_expiry': 'expiry',
     'invalid_identifier': 'email', 'identity_conflict': 'email', 'inbound_denied': 'inbounds',
     'inbound_unavailable': 'inbounds', 'mixed_protocols': 'inbounds', 'no_inbound': 'inbounds',
     'password_policy': 'password', 'wrong_password': 'current_password',
@@ -776,6 +776,11 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         return render(request,'customers.html',rows=rows,q=q,page=page,view=view,owners=owners,filters=params,any_customers=any_customers,total=total,
                       inbounds=allowed(None if user['role']=='admin' else user['id']))
 
+    def customer_expiry(customer):
+        if customer['remote_expiry'] is not None:
+            return customer['remote_expiry']
+        return json.loads(customer['payload']).get('expiryTime',0)
+
     def customer_form_page(request,user,customer=None,status=200,form_data=None,**context):
         """The create/edit form, with current values or what the user just typed."""
         owner=customer['user_id'] if customer else user['id']
@@ -783,9 +788,7 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         plan=None if admin_owned else current_plan(owner)
         quota_remaining=max(0,plan['allowance']-plan['sold']-plan['reserved'])/GIB if plan else 0
         p=json.loads(customer['payload']) if customer else {}
-        if customer and customer['remote_expiry'] and customer['remote_expiry']>0:
-            p['expiryTime']=customer['remote_expiry']
-        expiry=p.get('expiryTime',0)
+        expiry=customer_expiry(customer) if customer else 0
         values={'email':'','volume':gb(customer['package']).replace(',','') if customer else '','comment':p.get('comment',''),
                 'enable':p.get('enable',True),'first_use':expiry<0,'days':str(-expiry//86400000) if expiry<0 else '30',
                 'expiry':expiry_input(expiry/1000) if expiry>0 else expiry_input(now()+30*86400),'uuid':'','sub_id':'','credential':''}
@@ -805,7 +808,7 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
               'uuid':values['uuid'],'sub_id':values['sub_id'],'credential':values['credential'],'inbounds':values['inbounds']}
         return values,data
 
-    def apply_expiry(values,data):
+    def apply_expiry(values,data,current=0):
         if values['first_use']:
             try:
                 days=int(values['days'] or '0')
@@ -815,7 +818,8 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
                 raise RuleError('invalid_expiry')
             data['expiry']=-days*86400000
         else:
-            data['expiry']=parse_expiry(values['expiry'])*1000
+            data['expiry']=(current if current>0 and values['expiry']==expiry_input(current/1000)
+                            else parse_expiry(values['expiry'])*1000)
         if not data['inbounds']:
             raise RuleError('no_inbound')
 
@@ -898,7 +902,10 @@ def create_app(config=None, remote=None, background=True, telegram_transport=Non
         form=await request.form()
         values,data=read_customer_form(form)
         try:
-            apply_expiry(values,data)
+            current=customer_expiry(c)
+            if current>0 and values['first_use']:
+                raise RuleError('use_fixed_expiry')
+            apply_expiry(values,data,current)
             op=service.reserve(user,data,str(form.get('operation_id','')),'update',cid)
         except FORM_ERRORS as exc:
             code=error_code(exc)

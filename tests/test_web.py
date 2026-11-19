@@ -1,8 +1,10 @@
 import json
 import re
 import uuid
+from datetime import datetime
 from dataclasses import replace
 from urllib.parse import parse_qs, urlsplit
+from zoneinfo import ZoneInfo
 from fastapi.testclient import TestClient
 import pytest
 from reseller.web import create_app
@@ -438,3 +440,35 @@ def test_admin_sets_subscription_address_in_settings(setup):
         login(c)
         assert c.get('/settings').status_code==403
 
+
+
+def test_edit_customer_expiry_before_and_after_activation(client,setup):
+    config,panel,db,service,_,actor,_=setup
+    op=sale(service,actor,expiry=-30*86400000)
+    cid=op['customer_id']
+    path=f'/customers/{cid}/edit'
+    token=login(client)
+    fields={'csrf':token,'volume':'100','enable':'on','inbounds':'1'}
+
+    def edit(**values):
+        return client.post(path,data={**fields,'operation_id':str(uuid.uuid4()),**values},follow_redirects=False)
+
+    def date_input(ms):
+        return datetime.fromtimestamp(ms/1000,ZoneInfo(config.timezone)).strftime('%Y-%m-%dT%H:%M')
+
+    assert edit(first_use='on',days='45').status_code==303
+    assert panel.rows['customer-one']['expiryTime']==-45*86400000
+
+    activated=(now()+20*86400)*1000+123
+    panel.rows['customer-one']['expiryTime']=activated
+    service.refresh()
+    assert edit(first_use='on',days='90').status_code==400
+    assert edit(expiry=date_input(activated),comment='Keep exact expiry').status_code==303
+    assert panel.rows['customer-one']['expiryTime']==activated
+
+    for offset in (30,10):
+        expiry=(activated//60000+offset*1440)*60000
+        assert edit(expiry=date_input(expiry)).status_code==303
+        assert panel.rows['customer-one']['expiryTime']==expiry
+        assert db.one('SELECT remote_expiry FROM customers WHERE id=?',(cid,))['remote_expiry']==expiry
+        assert f'value="{date_input(expiry)}"' in client.get(path).text

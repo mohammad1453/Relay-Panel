@@ -131,6 +131,7 @@ MESSAGES = {
     'rate_limited': "You're going too fast. Wait a minute and try again.",
     'invalid_input': 'Some values are not valid. Check the form and try again.',
     'invalid_volume': 'Enter a data limit above 0 GB.',
+    'use_fixed_expiry': 'This customer already has a fixed expiration date. Turn off days from first use and edit the expiration date.',
     'invalid_expiry': 'Pick a date in the future, or a number of days from 1 to 3650.',
     'invalid_identifier': 'Use 2–64 characters: letters, numbers, dot, dash, underscore or @. No spaces.',
     'insufficient_quota': 'Not enough data left in your plan for this.',
